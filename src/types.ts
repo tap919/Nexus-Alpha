@@ -27,6 +27,10 @@ export interface RepoTrend {
   forks: number;
   growth: number;
   tags: string[];
+  aiAnalysis?: string;
+  stack?: string;
+  utility?: string;
+  buildType?: string;
 }
 
 export interface OpenSourceStat {
@@ -54,8 +58,77 @@ export interface VideoItem {
 export interface BuildStep {
   id: string;
   phase: string;
-  status: 'completed' | 'running' | 'pending';
+  status: 'completed' | 'running' | 'pending' | 'failed';
   details: string;
+}
+
+export interface E2EResult {
+  testName: string;
+  status: 'passed' | 'failed';
+  duration: number;
+  logs: string[];
+}
+
+export interface UnifiedPipelineAnalysis {
+  stack: string;
+  utility: string;
+  buildType: string;
+  suggestedIntegration: string;
+  potentialSynergy: string;
+}
+
+export interface ResourceMetrics {
+  cpu: number;
+  memory: number;
+  disk: number;
+  network: number;
+}
+
+export interface RAGContext {
+  indexedDocs: number;
+  relevantSnippets: string[];
+  lastSync: string;
+}
+
+export interface BrowserObservation {
+  url: string;
+  viewport: { w: number; h: number };
+  snapshotDescription: string;
+  elementsFound: string[];
+}
+
+export interface BrowserHistoryItem {
+  id: string;
+  timestamp: string;
+  url: string;
+  action: string;
+  summary: string;
+  type: 'navigation' | 'click' | 'input' | 'audit' | 'observation';
+}
+
+export interface PipelineExecution {
+  id: string;
+  sourceRepos: string[];
+  currentStep: string;
+  progress: number;
+  status: 'idle' | 'running' | 'success' | 'failed';
+  steps: BuildStep[];
+  e2eResults: E2EResult[];
+  logs: string[];
+  analysis?: UnifiedPipelineAnalysis;
+  manifest?: string;
+  metrics?: ResourceMetrics;
+  assignedAgentId?: string;
+  rag?: RAGContext;
+  browserSnapshot?: BrowserObservation;
+  browserHistory?: BrowserHistoryItem[];
+}
+
+export interface Signal {
+  time: string;
+  source: string;
+  signal: string;
+  value: string;
 }
 
 export interface DashboardData {
@@ -71,4 +144,32 @@ export interface DashboardData {
   trendingTools: TrendingTool[];
   videos: VideoItem[];
   buildPipeline: BuildStep[];
+  pipelineExecutions?: PipelineExecution[];
+  signals: Signal[];
+  synergyInsights?: string[];
+  harvestSources?: { name: string; url: string; lastUpdate: string }[];
+  customAgents: CustomAgent[];
+  cliState: CLIState;
+  mcpStatus?: {
+    activeServers: number;
+    connections: number;
+    lastPing: string;
+    protocol: string;
+  };
+}
+
+export interface CustomAgent {
+  id: string;
+  name: string;
+  type: 'script' | 'folder' | 'config';
+  status: 'active' | 'analyzing' | 'error';
+  analysis?: string;
+  lastActive: string;
+  fileCount?: number;
+}
+
+export interface CLIState {
+  activeProvider: 'opencode' | 'openrouter' | 'deepseek';
+  lastCommand?: string;
+  output: string[];
 }
