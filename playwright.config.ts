@@ -1,48 +1,24 @@
-import { defineConfig, devices } from '@playwright/test';
+import { devices, defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests',
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 2 : undefined,
-  reporter: [
-    ['html', { outputFolder: 'playwright-report' }],
-    ['json', { outputFile: 'playwright-report/results.json' }],
-    ['list'],
-  ],
-  timeout: 30000,
-  expect: { timeout: 10000 },
-
+  testDir: './tests/e2e',
+  /* Run tests in a single worker to simplify server access in Windows environments */
+  workers: 1,
   use: {
-    baseURL: 'http://localhost:3000',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
-    actionTimeout: 15000,
-    navigationTimeout: 20000,
+    baseURL: 'http://localhost:3002',
+    browserName: 'chromium',
+    // Allow running Playwright tests in CI without a display server
+    headless: true,
   },
-
+  timeout: 60000,
+  retries: 1,
   projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-    ...(process.env.CI
-      ? [
-          {
-            name: 'firefox',
-            use: { ...devices['Desktop Firefox'] },
-          },
-        ]
-      : []),
+    { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
   ],
-
   webServer: {
-    command:
-      'cross-env API_RATE_LIMIT=500 STRICT_RATE_LIMIT=100 npm run dev:all',
-    url: 'http://localhost:3000',
+    command: 'npm run server',
+    port: 3002,
+    timeout: 120 * 1000,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
   },
 });

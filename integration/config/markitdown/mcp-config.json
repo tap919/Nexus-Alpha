@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "markitdown": {
+      "command": "npx",
+      "args": ["-y", "markitdown-mcp", "--port", "3001"],
+      "env": {
+        "MARKITDOWN_PLUGINS": "pdf,docx,pptx,xlsx,images"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "env": {
+        "ALLOWED_DIRECTORIES": "/workspace"
+      }
+    }
+  }
+}

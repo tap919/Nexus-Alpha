@@ -1,0 +1,26 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Junk and secrets
+user-data/
+test-results/
+playwright-report/
+browser-harness-temp/
+deterministic-brain-main/user-data/
+deterministic-brain-main/test-results/
+*.db
+*.db-journal
+*.pma
+*.sqlite
+
+uploads/generated-apps/
+uploads/deployments/
+uploads/nexus/license.json
+uploads/nexus/trial.json
+uploads/nexus/fixes/fix-history.json
