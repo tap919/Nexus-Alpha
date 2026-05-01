@@ -13,7 +13,7 @@ import {
   saveFixHistory,
   extendAutoFixContext,
 } from '../../services/autoFixLoop';
-import type { AutoFixContext } from '../types/hooks';
+import type { AutoFixContext } from '../../types/hooks';
 
 const CTX = 'RealPipeline';
 
@@ -173,7 +173,7 @@ export class RealPipeline {
     const logs: string[] = [];
 
     try {
-      const { searchWikiForPhase } = await import('../services/wikiRetrievalService');
+      const { searchWikiForPhase } = await import('../../services/wikiRetrievalService');
       const wikiContext = searchWikiForPhase('Code Generation');
       if (wikiContext.relevantPages?.length > 0) {
         logs.push(`[RAG] Found ${wikiContext.relevantPages.length} relevant wiki page(s)`);
@@ -191,7 +191,7 @@ export class RealPipeline {
     const logs: string[] = [];
 
     try {
-      const { integrationHub: hub } = await import('../services/integrationService');
+      const { integrationHub: hub } = await import('../../services/integrationService');
       const status = await hub.getStatus();
       const online = Object.values(status).filter(Boolean).length;
       const total = Object.keys(status).length;
@@ -435,7 +435,7 @@ export class RealPipeline {
     }
 
     try {
-      const { ingestWikiLearning } = await import('../services/wikiRetrievalService');
+      const { ingestWikiLearning } = await import('../../services/wikiRetrievalService');
       await ingestWikiLearning(
         `Pipeline generated app: ${generation.summary}. Location: ${appDir}. Duration: ${generation.duration}ms. Success: ${generation.success}`,
         'Pipeline',

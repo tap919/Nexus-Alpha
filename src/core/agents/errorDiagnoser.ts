@@ -161,7 +161,7 @@ For fixStrategy:
 
     const result = await generateText(prompt, { temperature: 0.1, maxTokens: 4096 });
 
-    const cleaned = result.text
+    const cleaned = result
       .replace(/```json\s*/gi, '')
       .replace(/```\s*/g, '')
       .trim();
