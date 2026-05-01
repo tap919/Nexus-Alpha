@@ -7,7 +7,13 @@ import { cors } from 'hono/cors';
 import { stream } from 'hono/streaming';
 import { verify } from 'hono/jwt';
 import { serve } from '@hono/node-server';
+import { rateLimiter } from 'hono-rate-limiter';
 import { WebSocketServer, WebSocket } from 'ws';
+import { logAuditEvent, initAuditService } from './auditLogService';
+
+type Variables = {
+  user: { sub: string; role: string; email?: string };
+};
 import { runAutomatedPipeline } from '../services/pipelineService';
 import type { PipelineExecution } from '../types';
 import {
@@ -24,7 +30,7 @@ import {
 } from '../services/cheetahService';
 import { broadcastService } from './broadcastService';
 
-const app = new Hono();
+const app = new Hono<{ Variables: Variables }>();
 
 // ─── Auth Middleware ──────────────────────────────────────────────────────────
 
@@ -33,52 +39,94 @@ const AUTH_BYPASS = process.env.NEXUS_AUTH_BYPASS === 'true' && process.env.NODE
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || 'super-secret-jwt-token-with-at-least-32-characters-long';
 
 app.use('/api/*', async (c, next) => {
-  if (AUTH_BYPASS) return next();
+  if (AUTH_BYPASS) {
+    c.set('user', { sub: 'bypass-user', role: 'admin' });
+    return next();
+  }
   if (c.req.method === 'OPTIONS') return next();
 
-  const key =
-    c.req.header('x-api-key') ||
-    c.req.header('x-nexus-api-key');
+  const key = c.req.header('x-api-key') || c.req.header('x-nexus-api-key');
   const auth = c.req.header('authorization');
 
   // API key check (server-to-server)
-  if (NEXUS_API_KEY && key === NEXUS_API_KEY) return next();
+  if (NEXUS_API_KEY && key === NEXUS_API_KEY) {
+    c.set('user', { sub: 'system', role: 'system' });
+    return next();
+  }
 
-  // Strict JWT verification against Supabase secret
+  // Strict JWT verification against Supabase secret with issuer/audience
   if (auth?.startsWith('Bearer ')) {
     const token = auth.slice(7);
     try {
       const payload = await verify(token, SUPABASE_JWT_SECRET);
       if (payload && payload.exp && Date.now() / 1000 < (payload.exp as number)) {
+        // Enforce audience parity (Supabase default is 'authenticated')
+        if (payload.aud !== 'authenticated') {
+          throw new Error('Invalid JWT audience');
+        }
+        c.set('user', { 
+          sub: (payload.sub as string) || 'unknown', 
+          role: (payload.user_role as string) || 'user',
+          email: payload.email as string
+        });
         return next();
       }
-    } catch { /* JWT verification failed, fall through to 401 */ }
+    } catch (e) { 
+      /* JWT verification failed, log it */ 
+      await logAuditEvent({
+        actor: 'anonymous',
+        action: 'auth_failed',
+        target: c.req.path,
+        status: 'failure',
+        metadata: { reason: e instanceof Error ? e.message : 'Invalid token signature' }
+      }).catch(() => {});
+    }
   }
 
+  await logAuditEvent({
+    actor: 'anonymous',
+    action: 'access_denied',
+    target: c.req.path,
+    status: 'failure',
+    metadata: { reason: 'No valid credentials' }
+  }).catch(() => {});
   return c.json({ error: 'Unauthorized' }, 401);
 });
 
-// ─── Rate limiting (in-memory, per IP) ───────────────────────────────────────
-
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-
-function rateLimit(maxPerMin: number) {
+// ─── RBAC Authorization Middleware ─────────────────────────────────────────────
+export const requireRole = (allowedRoles: string[]) => {
   return async (c: any, next: any) => {
-    const ip = c.req.header('x-forwarded-for') ?? c.env?.ip ?? 'unknown';
-    const key = `${ip}:${c.req.path}`;
-    const now = Date.now();
-    const bucket = rateBuckets.get(key);
-    if (!bucket || now > bucket.resetAt) {
-      rateBuckets.set(key, { count: 1, resetAt: now + 60_000 });
-    } else {
-      bucket.count++;
-      if (bucket.count > maxPerMin) {
-        return c.json({ error: 'Rate limit exceeded' }, 429);
-      }
+    const user = c.get('user');
+    if (!user || (!allowedRoles.includes(user.role) && user.role !== 'admin' && user.role !== 'system')) {
+      await logAuditEvent({
+        actor: user?.sub || 'anonymous',
+        action: 'rbac_denied',
+        target: c.req.path,
+        status: 'failure',
+        metadata: { role: user?.role, required: allowedRoles }
+      }).catch(() => {});
+      return c.json({ error: 'Forbidden: Insufficient role' }, 403);
     }
     return next();
   };
-}
+};
+
+// ─── Rate limiting (Redis-ready via hono-rate-limiter) ───────────────────────
+const defaultLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  limit: 100,
+  keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
+  message: 'Too many requests, please try again later.',
+});
+
+const strictLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  limit: 15,
+  keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
+  message: 'Quota exceeded for high-cost endpoint.',
+});
+
+app.use('/api/*', defaultLimiter);
 
 app.use('/*', cors({ origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'] }));
 
@@ -119,7 +167,7 @@ app.get('/health', async (c) => {
   return c.json({ status: 'ok', ts: Date.now() });
 });
 
-app.post('/api/pipeline/run', async (c) => {
+app.post('/api/pipeline/run', requireRole(['admin', 'system']), strictLimiter, async (c) => {
   const body = await readJson<{ repos?: string[]; agentId?: string }>(c);
   const repos = body?.repos;
   if (!Array.isArray(repos) || repos.length === 0) {
@@ -211,7 +259,7 @@ app.get('/api/integrations/memory/:userId', async (c) => {
   }
 });
 
-app.post('/api/brain/query', async (c) => {
+app.post('/api/brain/query', requireRole(['admin', 'agent-runner']), strictLimiter, async (c) => {
   const body = await readJson<{ query?: string; lane?: string; verbose?: boolean }>(c);
   if (!body?.query) return c.json({ error: 'query is required' }, 400);
   try {
@@ -228,7 +276,7 @@ const BROWSER_COMMAND_ALLOWLIST = new Set([
   'new_tab', 'wait_for_load', 'page_info', 'page_source', 'page_links', 'capture_screenshot'
 ]);
 
-app.post('/api/brain/browser', async (c) => {
+app.post('/api/brain/browser', requireRole(['admin', 'agent-runner']), strictLimiter, async (c) => {
   const body = await readJson<{ command?: string; timeout?: number }>(c);
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
   if (!body.command) return c.json({ error: 'command is required' }, 400);
@@ -251,7 +299,7 @@ app.post('/api/brain/browser', async (c) => {
 // ─── Cheetah V3 Autocoder Routes ─────────────────────────────────────────────
 
 /** POST /api/autocoder/generate — Generate code using Cheetah V3 */
-app.post('/api/autocoder/generate', rateLimit(30), async (c) => {
+app.post('/api/autocoder/generate', requireRole(['admin', 'system']), strictLimiter, async (c) => {
   const body = await readJson<{
     pattern?: CheetahPattern;
     name?: string;
@@ -298,7 +346,7 @@ app.get('/api/autocoder/status', async (c) => {
 });
 
 // ─── Gemini proxy ────────────────────────────────────────────────────────────
-app.post('/api/proxy/gemini', rateLimit(20), async (c) => {
+app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   try {
     const body = await readJson<{ prompt?: string; model?: string }>(c);
     if (!body?.prompt) return c.json({ error: 'prompt required' }, 400);
@@ -317,7 +365,7 @@ app.post('/api/proxy/gemini', rateLimit(20), async (c) => {
 });
 
 // ─── CLI proxy (SSE stream) ─────────────────────────────────────────────────
-app.post('/api/proxy/cli/stream', rateLimit(20), async (c) => {
+app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   try {
     const body = await readJson<{
       provider?: 'openrouter' | 'deepseek' | 'opencode';
@@ -422,24 +470,44 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
     }
 
     // Strict JWT Check for WebSocket
+    let sub = 'anonymous';
     if (!AUTH_BYPASS) {
       const url = new URL(req.url ?? '/', `http://localhost`);
       const token = url.searchParams.get('token');
       if (!token) {
+        await logAuditEvent({ actor: 'anonymous', action: 'ws_auth_denied', target: '/ws', status: 'failure', metadata: { reason: 'Missing token' } }).catch(() => {});
         ws.close(1008, 'Unauthorized');
         return;
       }
       try {
         const payload = await verify(token, SUPABASE_JWT_SECRET);
-        if (!payload || !payload.exp || Date.now() / 1000 >= (payload.exp as number)) {
-          ws.close(1008, 'Token expired');
+        if (!payload || !payload.exp || Date.now() / 1000 >= (payload.exp as number) || payload.aud !== 'authenticated') {
+          await logAuditEvent({ actor: payload?.sub as string || 'anonymous', action: 'ws_auth_denied', target: '/ws', status: 'failure', metadata: { reason: 'Token invalid or wrong audience' } }).catch(() => {});
+          ws.close(1008, 'Token expired or invalid');
           return;
         }
-      } catch {
+        sub = payload.sub as string;
+        
+        // Quota: Limit WS connections per user
+        let userConns = 0;
+        for (const [_, clientSub] of Array.from(clients).map(c => [c, (c as any).nexusSub])) {
+          if (clientSub === sub) userConns++;
+        }
+        if (userConns >= 5) {
+          await logAuditEvent({ actor: sub, action: 'ws_quota_exceeded', target: '/ws', status: 'failure', metadata: { connections: userConns } }).catch(() => {});
+          ws.close(1013, 'User connection quota exceeded');
+          return;
+        }
+      } catch (e) {
+        await logAuditEvent({ actor: 'anonymous', action: 'ws_auth_denied', target: '/ws', status: 'failure', metadata: { reason: 'Invalid signature' } }).catch(() => {});
         ws.close(1008, 'Invalid token signature');
         return;
       }
+    } else {
+      sub = 'bypass-user';
     }
+
+    (ws as any).nexusSub = sub;
 
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'connected', message: 'Nexus Alpha WS ready', ts: Date.now() }));

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from '../fixtures';
 
 test.describe('Performance & Resilience', () => {
   test('page loads within 8 seconds', async ({ page }) => {

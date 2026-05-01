@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from '../fixtures';
 
 test.describe('Navigation - Tabs', () => {
   test.beforeEach(async ({ nexus }) => {

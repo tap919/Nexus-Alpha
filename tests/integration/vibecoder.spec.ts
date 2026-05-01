@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from '../fixtures';
 
 test.describe('VibeCoder Tab Prompt', () => {
   test.beforeEach(async ({ nexus }) => {

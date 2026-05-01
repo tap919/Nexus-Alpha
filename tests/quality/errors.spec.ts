@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from '../fixtures';
 
 test.describe('Error Tracking & Self-Healing', () => {
   test.beforeEach(async ({ nexus }) => {

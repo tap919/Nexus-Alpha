@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from '../fixtures';
 
 test.describe('Dashboard (Overview)', () => {
   test.beforeEach(async ({ nexus }) => {
