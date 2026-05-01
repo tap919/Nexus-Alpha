@@ -24,6 +24,16 @@ const DATA_DIR = path.resolve(process.cwd(), "uploads", "nexus");
 const FIXES_DIR = path.join(DATA_DIR, "fixes");
 const MAX_FIX_ATTEMPTS = 5;
 
+// ─── Security Configuration ───────────────────────────────────────────────
+
+const ALLOW_AUTO_FIX = process.env.NEXUS_ALLOW_AUTO_FIX === 'true';
+const SAFE_NPM_PACKAGES = new Set(["typescript", "vite", "vitest", "eslint", "prettier", "rimraf", "cross-env", "dotenv"]);
+const SAFE_NPX_PACKAGES = new Set(["tsc", "vite", "vitest", "eslint", "prettier", "rimraf", "prisma", "supabase"]);
+
+// Strict regex for package names (prevents path traversal or malicious scopes)
+const PKG_REGEX = /^(@[a-z0-9-]+\/)?[a-z0-9-]+$/i;
+
+
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
@@ -102,15 +112,18 @@ export async function applyFix(
     const projectDir = context.sourceRepos?.[0] || process.cwd();
 
     if (fixStrategy === "add_dep" && fixCode) {
-      const pkgName = fixCode.trim();
-      const PKG_REGEX = /^@?[a-z0-9][\w\-.]*[a-z0-9]$/;
-      if (!PKG_REGEX.test(pkgName)) {
-        logger.warn("AutoFixLoop", `Rejected invalid package name: ${pkgName}`);
+      if (!ALLOW_AUTO_FIX) {
+        logger.warn("AutoFixLoop", `Blocked dependency install (NEXUS_ALLOW_AUTO_FIX=false): ${fixCode}`);
+        return false;
+      }
+      const pkgName = fixCode.trim().split('@')[0]; // Remove version tag for validation
+      if (!PKG_REGEX.test(pkgName) || !SAFE_NPM_PACKAGES.has(pkgName)) {
+        logger.warn("AutoFixLoop", `Rejected unauthorized or malformed package: ${pkgName}`);
         return false;
       }
       try {
-        execSync(`npm install ${pkgName}`, { timeout: 60000, cwd: projectDir, stdio: "pipe" });
-        logger.info("AutoFixLoop", `Installed dependency: ${pkgName}`);
+        execSync(`npm install ${fixCode.trim()}`, { timeout: 60000, cwd: projectDir, stdio: "pipe" });
+        logger.info("AutoFixLoop", `Installed dependency: ${fixCode.trim()}`);
         return true;
       } catch (cmdErr) {
         logger.warn("AutoFixLoop", `Dependency install failed: ${cmdErr instanceof Error ? cmdErr.message : String(cmdErr)}`);
@@ -119,6 +132,10 @@ export async function applyFix(
     }
 
     if (fixStrategy === "add_import" && targetFile && fixCode) {
+      if (!ALLOW_AUTO_FIX) {
+        logger.warn("AutoFixLoop", `Blocked file write (NEXUS_ALLOW_AUTO_FIX=false): ${targetFile}`);
+        return false;
+      }
       const filePath = path.resolve(projectDir, targetFile);
       if (!filePath.startsWith(path.resolve(projectDir) + path.sep)) {
         logger.warn("AutoFixLoop", `Rejected path traversal: ${targetFile}`);
@@ -126,6 +143,11 @@ export async function applyFix(
       }
       if (existsSync(filePath)) {
         const content = readFileSync(filePath, "utf-8");
+        // Simple sanity check for AI-generated import code
+        if (!fixCode.includes("import ") && !fixCode.includes("require(")) {
+          logger.warn("AutoFixLoop", `Rejected malformed import fix: ${fixCode}`);
+          return false;
+        }
         const lines = content.split("\n");
         let insertAt = 0;
         for (let i = lines.length - 1; i >= 0; i--) {
@@ -185,16 +207,36 @@ export async function applyFix(
     }
 
     if (fixCode && (fixCode.startsWith("npm ") || fixCode.startsWith("npx "))) {
+      if (!ALLOW_AUTO_FIX) {
+        logger.warn("AutoFixLoop", `Blocked command execution (NEXUS_ALLOW_AUTO_FIX=false): ${fixCode}`);
+        return false;
+      }
+
       const SHELL_META = /[;&|><`$(){}[\]#!\\*?~]/;
-      const allowed = fixCode.startsWith("npm install ") || fixCode.startsWith("npm rebuild ") || fixCode.startsWith("npx ");
       if (SHELL_META.test(fixCode.replace(/^npm (install|rebuild) /, ''))) {
         logger.warn("AutoFixLoop", `Rejected fix command with shell metacharacters: ${fixCode}`);
         return false;
       }
-      if (!allowed && fixCode.startsWith("npm ")) {
-        logger.warn("AutoFixLoop", `Rejected unsafe npm command: ${fixCode}`);
-        return false;
+
+      // Strict validation for npm/npx
+      const parts = fixCode.trim().split(/\s+/);
+      const tool = parts[0];
+      const cmd = parts[1];
+
+      if (tool === "npm") {
+        const allowedNpm = ["install", "rebuild", "run", "test"];
+        if (!allowedNpm.includes(cmd)) {
+          logger.warn("AutoFixLoop", `Rejected unauthorized npm command: ${cmd}`);
+          return false;
+        }
+      } else if (tool === "npx") {
+        const pkg = cmd?.split('@')[0];
+        if (!pkg || !SAFE_NPX_PACKAGES.has(pkg)) {
+          logger.warn("AutoFixLoop", `Rejected unauthorized npx package: ${pkg}`);
+          return false;
+        }
       }
+
       try {
         execSync(fixCode, { timeout: 60000, cwd: projectDir, stdio: "pipe" });
         logger.info("AutoFixLoop", `Executed fix command: ${fixCode}`);
@@ -387,12 +429,49 @@ function getFixHistoryPath(): string {
 export function saveFixHistory(entry: FixHistoryEntry): void {
   ensureDir(FIXES_DIR);
   const historyPath = getFixHistoryPath();
-  const existing: FixHistoryEntry[] = existsSync(historyPath)
-    ? JSON.parse(readFileSync(historyPath, "utf-8"))
-    : [];
+  const backupPath = historyPath + ".bak";
+
+  let existing: FixHistoryEntry[] = [];
+  if (existsSync(historyPath)) {
+    try {
+      existing = JSON.parse(readFileSync(historyPath, "utf-8"));
+    } catch (err) {
+      logger.error("AutoFixLoop", `Failed to parse fix history: ${err}. Attempting recovery from backup.`);
+      if (existsSync(backupPath)) {
+        try {
+          existing = JSON.parse(readFileSync(backupPath, "utf-8"));
+        } catch (bakErr) {
+          logger.error("AutoFixLoop", `Backup recovery failed: ${bakErr}`);
+        }
+      }
+    }
+  }
+
   existing.unshift(entry);
   if (existing.length > 100) existing.length = 100;
-  writeFileSync(historyPath, JSON.stringify(existing, null, 2), "utf-8");
+
+  try {
+    // Write to a temporary file first for atomic-like replacement
+    const tempPath = historyPath + ".tmp";
+    if (existsSync(historyPath)) {
+      // Create a backup of the current good file before overwriting
+      writeFileSync(backupPath, readFileSync(historyPath, "utf-8"), "utf-8");
+    }
+    writeFileSync(tempPath, JSON.stringify(existing, null, 2), "utf-8");
+    // On Windows, rename doesn't work if target exists, so we delete first
+    if (existsSync(historyPath)) {
+      try {
+        // Simple rename-replace pattern
+        writeFileSync(historyPath, readFileSync(tempPath, "utf-8"), "utf-8");
+      } catch (err) {
+        logger.error("AutoFixLoop", `Atomic write failed: ${err}`);
+      }
+    } else {
+      writeFileSync(historyPath, JSON.stringify(existing, null, 2), "utf-8");
+    }
+  } catch (err) {
+    logger.error("AutoFixLoop", `Failed to save fix history: ${err}`);
+  }
 }
 
 export function getFixHistory(): FixHistoryEntry[] {

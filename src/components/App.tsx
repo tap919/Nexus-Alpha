@@ -10,27 +10,27 @@ import { RefreshCcw } from 'lucide-react';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
 import { Footer } from '../layout/Footer';
-import { OverviewTab } from '../views/OverviewTab';
-import { ComposerTab } from '../views/ComposerTab';
-import { LicenseGate } from '../views/LicenseGate';
+import { OverviewTab } from './views/OverviewTab';
+import { ComposerTab } from './views/ComposerTab';
+import { LicenseGate } from './views/LicenseGate';
 import { GlobalCommandBar } from './GlobalCommandBar';
 import { useNexusApp } from '../hooks/useNexusApp';
 
 // Lazy-loaded views
-const CommandCenterTab = lazy(() => import('../views/CommandCenterTab').then(m => ({ default: m.CommandCenterTab })));
-const PipelineTab = lazy(() => import('../views/PipelineTab').then(m => ({ default: m.PipelineTab })));
-const SettingsTab = lazy(() => import('../views/SettingsTab').then(m => ({ default: m.SettingsTab })));
-const ActivityTab = lazy(() => import('../views/ActivityTab').then(m => ({ default: m.ActivityTab })));
-const HistoryTab = lazy(() => import('../views/HistoryTab').then(m => ({ default: m.HistoryTab })));
-const AuditTab = lazy(() => import('../views/AuditTab').then(m => ({ default: m.AuditTab })));
-const MissionControlTab = lazy(() => import('../views/MissionControlTab'));
-const EditorTab = lazy(() => import('../views/EditorTab'));
-const ChangesTab = lazy(() => import('../views/ChangesTab'));
-const MemoryTab = lazy(() => import('../views/MemoryTab'));
+const CommandCenterTab = lazy(() => import('./views/CommandCenterTab').then(m => ({ default: m.CommandCenterTab })));
+const PipelineTab = lazy(() => import('./views/PipelineTab').then(m => ({ default: m.PipelineTab })));
+const SettingsTab = lazy(() => import('./views/SettingsTab').then(m => ({ default: m.SettingsTab })));
+const ActivityTab = lazy(() => import('./views/ActivityTab').then(m => ({ default: m.ActivityTab })));
+const HistoryTab = lazy(() => import('./views/HistoryTab').then(m => ({ default: m.HistoryTab })));
+const AuditTab = lazy(() => import('./views/AuditTab').then(m => ({ default: m.AuditTab })));
+const MissionControlTab = lazy(() => import('./views/MissionControlTab'));
+const EditorTab = lazy(() => import('./views/EditorTab'));
+const ChangesTab = lazy(() => import('./views/ChangesTab'));
+const MemoryTab = lazy(() => import('./views/MemoryTab'));
 const PreviewTab = lazy(() => import('../features/preview/MultimodalPreview').then(m => ({ default: m.MultimodalPreview })));
 const ExtensionsTab = lazy(() => import('../features/extensions/ExtensionsPanel').then(m => ({ default: m.ExtensionsPanel })));
 const SystemTab = lazy(() => import('../features/system/SystemPanel').then(m => ({ default: m.SystemPanel })));
-const AgentEvalTab = lazy(() => import('../views/AgentEvalTab').then(m => ({ default: m.AgentEvalTab })));
+const AgentEvalTab = lazy(() => import('./views/AgentEvalTab').then(m => ({ default: m.AgentEvalTab })));
 const MagicTab = lazy(() => import('../features/composer/MagicComposer').then(m => ({ default: m.MagicComposer })));
 
 export default function App() {

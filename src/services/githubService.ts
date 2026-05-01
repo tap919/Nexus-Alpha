@@ -8,16 +8,17 @@ import { fetchGitHubProxy } from './apiClient';
 import { logger } from '../lib/logger';
 
 const GITHUB_API = "https://api.github.com";
-
 const TIMEOUT = 10000;
 const GITHUB_CIRCUIT = 'github-api';
 
 function getHeaders(token?: string): HeadersInit {
+  const finalToken = token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   const headers: HeadersInit = {
     Accept: "application/vnd.github.v3+json",
     "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "Nexus-Alpha",
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (finalToken) headers["Authorization"] = `Bearer ${finalToken}`;
   return headers;
 }
 
@@ -39,46 +40,7 @@ export interface GHTrendingRepo extends GHRepo {
   weeklyGrowth?: number;
 }
 
-function generateFallbackRepos(query: string, days: number): GHRepo[] {
-  const now = Date.now();
-  const seed = Math.floor(now / 300000);
-  const bases = [
-    { name: "ai-agent-framework", full_name: "nexus-alpha/ai-agent-framework", description: "Multi-agent orchestration framework", stars: 14200, forks: 2100, language: "TypeScript", topics: ["ai", "agents"] },
-    { name: "claude-code-sdk", full_name: "anthropic/claude-code-sdk", description: "Official Claude Code SDK", stars: 8900, forks: 1200, language: "Python", topics: ["sdk", "claude"] },
-    { name: "open-mcp-protocol", full_name: "protocol-labs/open-mcp-protocol", description: "Model Context Protocol implementation", stars: 23400, forks: 3400, language: "Rust", topics: ["mcp", "protocol"] },
-    { name: "llm-router", full_name: "cost-optimize/llm-router", description: "Cost-aware LLM routing layer", stars: 6700, forks: 890, language: "TypeScript", topics: ["llm", "cost"] },
-    { name: "graphify", full_name: "codegraph/graphify", description: "Code dependency graph analyzer", stars: 4500, forks: 560, language: "TypeScript", topics: ["graph", "analysis"] },
-    { name: "self-healing-pipelines", full_name: "ai-engineering/self-healing-pipelines", description: "Self-healing CI/CD with AI agents", stars: 19800, forks: 2800, language: "Python", topics: ["ci", "agents"] },
-    { name: "vectordb-comparison", full_name: "vectordb/vectordb-comparison", description: "Vector database benchmarks", stars: 12300, forks: 1500, language: "Python", topics: ["vectordb", "benchmarks"] },
-    { name: "e2e-testing-ai", full_name: "testautomation/e2e-testing-ai", description: "E2E testing with AI agents", stars: 16700, forks: 2300, language: "TypeScript", topics: ["testing", "e2e"] },
-    { name: "biome-linter", full_name: "toolbench/biome-linter", description: "Next-gen linter and formatter", stars: 7800, forks: 980, language: "Rust", topics: ["linter", "formatter"] },
-    { name: "temporal-ai-workflows", full_name: "durable-code/temporal-ai-workflows", description: "Durable AI workflow engine", stars: 8900, forks: 1200, language: "TypeScript", topics: ["workflows", "temporal"] },
-    { name: "playwright-ai", full_name: "testautomation/playwright-ai", description: "AI-enhanced Playwright testing", stars: 11000, forks: 1400, language: "TypeScript", topics: ["testing", "playwright"] },
-    { name: "qdrant-sdk", full_name: "qdrant/qdrant-sdk", description: "Vector search SDK", stars: 9800, forks: 1300, language: "Python", topics: ["vectordb", "search"] },
-  ];
 
-  const repos: GHRepo[] = [];
-  for (let i = 0; i < 20; i++) {
-    const base = bases[(seed + i) % bases.length];
-    const starNoise = Math.floor((seed * 137 + i * 73) % 5000);
-    const forkNoise = Math.floor((seed * 91 + i * 53) % 800);
-
-    repos.push({
-      id: (seed * 31 + i * 7) % 10000 + 1000000,
-      full_name: base.full_name,
-      name: base.name,
-      description: base.description,
-      stargazers_count: base.stars + starNoise,
-      forks_count: base.forks + forkNoise,
-      language: base.language,
-      topics: base.topics,
-      html_url: `https://github.com/${base.full_name}`,
-      pushed_at: new Date(now - i * 3600000).toISOString(),
-      open_issues_count: Math.floor((seed * 47 + i * 29) % 100),
-    });
-  }
-  return repos;
-}
 
 /** Search trending repos created/pushed in last N days */
 export async function searchTrendingRepos(
@@ -101,12 +63,13 @@ export async function searchTrendingRepos(
       try {
         const res = await fetch(url.toString(), { headers: getHeaders(token), signal: controller.signal });
         if (!res.ok) throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
-        return res.json().then(j => j.items as GHRepo[]);
+        const data = await res.json();
+        return (data.items || []) as GHRepo[];
       } finally {
         clearTimeout(timer);
       }
     },
-    generateFallbackRepos(query, days),
+    [], // Return empty instead of misleading fake data
   );
 }
 

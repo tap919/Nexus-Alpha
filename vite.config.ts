@@ -86,17 +86,6 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? "1.0.0"),
-    global: "globalThis",
-    "process.env": {},
-    "process.version": JSON.stringify(""),
-    "process.versions": JSON.stringify({ node: "" }),
-    "process.cwd": JSON.stringify("/"),
-    "process.platform": JSON.stringify("browser"),
-    "process.release": JSON.stringify({ name: "browser" }),
-    "process.browser": JSON.stringify(true),
-    "process.stdout": "undefined",
-    "process.stderr": "undefined",
-    "process.stdin": "undefined",
-    "process.isTTY": "undefined",
+    // Removed redundant process/global polyfills that conflict with vite-plugin-node-polyfills
   },
 });
