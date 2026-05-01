@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { stream } from 'hono/streaming';
@@ -7,22 +11,82 @@ import { runAutomatedPipeline } from '../services/pipelineService';
 import type { PipelineExecution } from '../types';
 import {
   integrationHub,
-  NanobotClient,
-  QdrantClient,
-  FirecrawlClient,
-  TavilyClient,
-  Mem0Client,
-  LangfuseClient,
 } from '../services/integrationService';
 import { runDeterministicBrain, runBrowserHarness } from './brainToolService';
 import { initPipelineQueue, enqueuePipeline, shutdownPipelineQueue } from './pipelineQueue';
+import {
+  generateWithCheetah,
+  getCheetahPatterns,
+  getCheetahStatus,
+  estimateCheetahSavings,
+  type CheetahPattern,
+} from '../services/cheetahService';
+import { broadcastService } from './broadcastService';
 
 const app = new Hono();
 
+// ─── Auth Middleware ──────────────────────────────────────────────────────────
+
+const NEXUS_API_KEY = process.env.NEXUS_API_KEY || '';
+const AUTH_BYPASS = process.env.NEXUS_AUTH_BYPASS === 'true';
+
+app.use('/api/*', async (c, next) => {
+  if (AUTH_BYPASS) return next();
+  if (c.req.method === 'OPTIONS') return next();
+
+  const key =
+    c.req.header('x-api-key') ||
+    c.req.header('x-nexus-api-key');
+  const auth = c.req.header('authorization');
+
+  // API key check (server-to-server)
+  if (NEXUS_API_KEY && key === NEXUS_API_KEY) return next();
+
+  // JWT bearer check (frontend Supabase sessions)
+  if (auth?.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    try {
+      const [, payloadB64] = token.split('.')
+      if (payloadB64) {
+        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+        if (payload.exp && Date.now() / 1000 < payload.exp) return next();
+      }
+    } catch { /* fall through to 401 */ }
+  }
+
+  return c.json({ error: 'Unauthorized' }, 401);
+});
+
+// ─── Rate limiting (in-memory, per IP) ───────────────────────────────────────
+
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(maxPerMin: number) {
+  return async (c: any, next: any) => {
+    const ip = c.req.header('x-forwarded-for') ?? c.env?.ip ?? 'unknown';
+    const key = `${ip}:${c.req.path}`;
+    const now = Date.now();
+    const bucket = rateBuckets.get(key);
+    if (!bucket || now > bucket.resetAt) {
+      rateBuckets.set(key, { count: 1, resetAt: now + 60_000 });
+    } else {
+      bucket.count++;
+      if (bucket.count > maxPerMin) {
+        return c.json({ error: 'Rate limit exceeded' }, 429);
+      }
+    }
+    return next();
+  };
+}
+
 app.use('/*', cors({ origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'] }));
 
-async function readJson<T>(c: { req: { json: () => Promise<unknown> } }): Promise<T> {
-  return await c.req.json().catch(() => ({})) as T;
+async function readJson<T>(c: { req: { json: () => Promise<unknown> } }): Promise<T | null> {
+  try {
+    return await c.req.json() as T;
+  } catch {
+    return null;
+  }
 }
 
 const PORT_HTTP = Number(process.env.PORT ?? 3002);
@@ -145,9 +209,19 @@ app.post('/api/brain/query', async (c) => {
   }
 });
 
+const BROWSER_COMMAND_ALLOWLIST = new Set([
+  'screenshot', 'navigate', 'click', 'type', 'wait',
+  'get_text', 'get_html', 'evaluate', 'scroll', 'wait_for_selector',
+]);
+
 app.post('/api/brain/browser', async (c) => {
   const body = await readJson<{ command?: string; timeout?: number }>(c);
-  if (!body?.command) return c.json({ error: 'command is required' }, 400);
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
+  if (!body.command) return c.json({ error: 'command is required' }, 400);
+  const cmd = body.command.split(' ')[0];
+  if (!BROWSER_COMMAND_ALLOWLIST.has(cmd)) {
+    return c.json({ error: `Command "${cmd}" not permitted. Allowed: ${[...BROWSER_COMMAND_ALLOWLIST].join(', ')}` }, 403);
+  }
   try {
     const result = await runBrowserHarness({ command: body.command, timeout: body.timeout });
     return c.json({ result, ts: Date.now() });
@@ -156,8 +230,57 @@ app.post('/api/brain/browser', async (c) => {
   }
 });
 
+// ─── Cheetah V3 Autocoder Routes ─────────────────────────────────────────────
+
+/** POST /api/autocoder/generate — Generate code using Cheetah V3 */
+app.post('/api/autocoder/generate', rateLimit(30), async (c) => {
+  const body = await readJson<{
+    pattern?: CheetahPattern;
+    name?: string;
+    options?: Record<string, unknown>;
+  }>(c);
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
+  if (!body.pattern || !body.name) {
+    return c.json({ error: 'pattern and name are required' }, 400);
+  }
+
+  const supported = getCheetahPatterns();
+  if (!supported.includes(body.pattern)) {
+    return c.json({ error: `Unknown pattern. Supported: ${supported.join(', ')}` }, 400);
+  }
+
+  const taskId = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const result = await generateWithCheetah({
+    taskId,
+    pattern: body.pattern,
+    name: body.name,
+    options: body.options as any,
+  });
+
+  return c.json(result, result.success ? 200 : 500);
+});
+
+/** GET /api/autocoder/patterns — List supported Cheetah patterns */
+app.get('/api/autocoder/patterns', (c) => {
+  const patterns = getCheetahPatterns();
+  return c.json({
+    patterns: patterns.map(p => ({ pattern: p, tokenSavings: estimateCheetahSavings(p) })),
+    total: patterns.length,
+  });
+});
+
+/** GET /api/autocoder/status — Cheetah engine status */
+app.get('/api/autocoder/status', async (c) => {
+  try {
+    const status = await getCheetahStatus();
+    return c.json({ ...status, ts: Date.now() });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'Status error' }, 500);
+  }
+});
+
 // ─── Gemini proxy ────────────────────────────────────────────────────────────
-app.post('/api/proxy/gemini', async (c) => {
+app.post('/api/proxy/gemini', rateLimit(20), async (c) => {
   try {
     const body = await readJson<{ prompt?: string; model?: string }>(c);
     if (!body?.prompt) return c.json({ error: 'prompt required' }, 400);
@@ -176,7 +299,7 @@ app.post('/api/proxy/gemini', async (c) => {
 });
 
 // ─── CLI proxy (SSE stream) ─────────────────────────────────────────────────
-app.post('/api/proxy/cli/stream', async (c) => {
+app.post('/api/proxy/cli/stream', rateLimit(20), async (c) => {
   try {
     const body = await readJson<{
       provider?: 'openrouter' | 'deepseek' | 'opencode';
@@ -248,10 +371,18 @@ app.post('/api/proxy/cli/stream', async (c) => {
   }
 });
 
-// ─── Globals for cleanup ────────────────────────────────────────────────────
+// ─── Globals for cleanup ─────────────────────────────────────────────────────
 let wsServer: WebSocketServer | null = null;
-// ─── Start ───────────────────────────────────────────────────────────────────
+const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
+
+// ─── Start ────────────────────────────────────────────────────────────────────
 (async () => {
+  // Production safety: require a real API key
+  if (process.env.NODE_ENV === 'production' && (!NEXUS_API_KEY || NEXUS_API_KEY === 'nexus-alpha-dev-key')) {
+    console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
+    process.exit(1);
+  }
+
   const queueReady = await initPipelineQueue();
   console.log(`[Q] BullMQ pipeline queue ${queueReady ? 'connected' : 'unavailable (simulated mode)'}`);
 
@@ -262,8 +393,23 @@ let wsServer: WebSocketServer | null = null;
     res.end(await response.text());
   });
 
-  wsServer = new WebSocketServer({ server: httpServer });
-  wsServer.on('connection', (ws) => {
+  wsServer = new WebSocketServer({ server: httpServer, path: '/ws' });
+  wsServer.on('connection', (ws, req) => {
+    if (clients.size >= MAX_WS_CLIENTS) {
+      ws.close(1013, 'Server at capacity');
+      return;
+    }
+
+    // Auth check for WebSocket (skip in dev bypass mode)
+    if (!AUTH_BYPASS) {
+      const url = new URL(req.url ?? '/', `http://localhost`);
+      const token = url.searchParams.get('token');
+      if (!token) {
+        ws.close(1008, 'Unauthorized');
+        return;
+      }
+    }
+
     clients.add(ws);
     ws.send(JSON.stringify({ type: 'connected', message: 'Nexus Alpha WS ready', ts: Date.now() }));
     ws.on('close', () => clients.delete(ws));
@@ -276,9 +422,17 @@ let wsServer: WebSocketServer | null = null;
     });
   });
 
+  broadcastService.setHandler((data) => {
+    const json = JSON.stringify(data);
+    for (const client of clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(json);
+    }
+  });
+
   httpServer.listen(PORT_HTTP, () => {
     console.log(`[Hono] Nexus Alpha server running on port ${PORT_HTTP}`);
-    console.log(`[WS]   WebSocket on same port`);
+    console.log(`[WS]   WebSocket at ws://localhost:${PORT_HTTP}/ws`);
+    if (AUTH_BYPASS) console.warn('[WARN] Auth bypass is ON — do not use NEXUS_AUTH_BYPASS=true in production');
   });
 })();
 

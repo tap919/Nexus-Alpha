@@ -6,10 +6,14 @@
  */
 import { encodeToToon, getToonStats, compressJson } from './toonService';
 import { queryGraph, getGraph, graphAvailable } from './graphifyService';
-import { generateCode, canGeneratePattern, estimateTokenSavings } from './autocoderService';
+import {
+  generateWithCheetah,
+  estimateCheetahSavings,
+  getCheetahPatterns,
+  type CheetahPattern,
+} from './cheetahService';
 import { useCodeixStore } from './codeixService';
 import { useSerenaStore } from './serenaService';
-import type { CodePattern } from './autocoderService';
 import { logger } from "../lib/logger";
 
 export interface TokenOptimizerConfig {
@@ -108,29 +112,27 @@ const promptCache = new PromptCache();
 
 // ─── Autocoder Pattern Detection ──────────────────────────────────────────────
 
-const PATTERN_KEYWORDS: Record<CodePattern, string[]> = {
+const PATTERN_KEYWORDS: Record<CheetahPattern, string[]> = {
   "crud-api": ["crud", "api", "endpoint", "rest", "route", "create", "read", "update", "delete"],
   "react-component": ["component", "react", "jsx", "tsx", "ui", "button", "card", "modal"],
   "typescript-interface": ["interface", "type", "type definition", "schema", "typedef"],
   "database-schema": ["database", "table", "schema", "sql", "migration", "model"],
+  "supabase-table": ["supabase", "rls", "row level", "auth.users", "supabase table"],
   "test-file": ["test", "spec", "jest", "vitest", "testing", "unit"],
   "config-file": ["config", "configuration", "settings", "env"],
   "hook": ["hook", "useeffect", "usestate", "usecallback", "custom hook"],
   "service": ["service", "class", "singleton", "factory"],
   "model": ["model", "class", "entity", "data"],
   "middleware": ["middleware", "interceptor", "filter", "guard"],
+  "hono-route": ["hono", "route", "api route", "hono route"],
 };
 
-function detectAutocoderPattern(prompt: string): CodePattern | null {
+function detectCheetahPattern(prompt: string): CheetahPattern | null {
   const lower = prompt.toLowerCase();
-
   for (const [pattern, keywords] of Object.entries(PATTERN_KEYWORDS)) {
     const matchCount = keywords.filter(kw => lower.includes(kw)).length;
-    if (matchCount >= 2) {
-      return pattern as CodePattern;
-    }
+    if (matchCount >= 2) return pattern as CheetahPattern;
   }
-
   return null;
 }
 
@@ -188,14 +190,15 @@ export async function optimizePrompt(prompt: string): Promise<OptimizedPrompt> {
     }
   }
 
-  // 2. Check for autocoder pattern
+  // 2. Check for Cheetah V3 autocoder pattern
   if (config.enableAutocoder) {
-    const pattern = detectAutocoderPattern(prompt);
-    if (pattern && canGeneratePattern(pattern)) {
-      const result = generateCode({ pattern, name: extractName(prompt) });
-      if (result.success) {
-        const estimatedSavings = estimateTokenSavings(pattern);
-        logger.info("TokenOptimizer", `Autocoder generated ${pattern} - ~${estimatedSavings} tokens saved`);
+    const pattern = detectCheetahPattern(prompt);
+    if (pattern) {
+      const taskId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const result = await generateWithCheetah({ taskId, pattern, name: extractName(prompt) });
+      if (result.success && result.files.length > 0) {
+        const estimatedSavings = estimateCheetahSavings(pattern);
+        logger.info("TokenOptimizer", `Cheetah generated ${pattern} — ~${estimatedSavings} tokens saved via ${result.engine}`);
         return {
           original: prompt,
           optimized: result.files[0]?.content || "",
@@ -365,4 +368,8 @@ export function resetOptimizerStats(): void {
 
 export { compressJson as compressJsonToToon } from './toonService';
 export { queryGraph, getGraph, graphAvailable } from './graphifyService';
-export { generateCode, getSupportedPatterns, estimateTokenSavings as getAutocoderSavings } from './autocoderService';
+export {
+  generateWithCheetah as generateCode,
+  getCheetahPatterns as getSupportedPatterns,
+  estimateCheetahSavings as getAutocoderSavings,
+} from './cheetahService';
