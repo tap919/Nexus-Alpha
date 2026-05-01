@@ -1,8 +1,8 @@
 /**
- * Secrets Manager
- * In-memory encrypted store for API keys and provider credentials.
- * Keys are stored in sessionStorage as base64 (obfuscated, not truly encrypted for browser env).
- * For production, wire to a server-side vault or Supabase Vault.
+ * Secrets Manager Proxy
+ * Client-side interface for secure server-held API keys and credentials.
+ * Provider keys are stored on the server and prioritized by proxy routes.
+ * The client only receives masked placeholders for UI purposes.
  */
 
 export type SecretKey =

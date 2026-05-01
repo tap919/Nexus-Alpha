@@ -222,7 +222,7 @@ app.get('/api/pipeline/status/:id', requireRole(['admin', 'user']), strictLimite
   }
 });
 
-app.get('/api/integrations/status', async (c) => {
+app.get('/api/integrations/status', requireRole(['admin', 'user']), async (c) => {
   try {
     const status = await integrationHub.getStatus();
     return c.json({
@@ -235,7 +235,7 @@ app.get('/api/integrations/status', async (c) => {
   }
 });
 
-app.post('/api/integrations/agent/chat', async (c) => {
+app.post('/api/integrations/agent/chat', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   const body = await readJson<{ message?: string; sessionId?: string }>(c);
   if (!body?.message) return c.json({ error: 'message is required' }, 400);
   try {
@@ -247,7 +247,7 @@ app.post('/api/integrations/agent/chat', async (c) => {
   }
 });
 
-app.post('/api/integrations/search/web', async (c) => {
+app.post('/api/integrations/search/web', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   const body = await readJson<{ query?: string; source?: 'firecrawl' | 'tavily' | 'all' }>(c);
   if (!body?.query) return c.json({ error: 'query is required' }, 400);
   try {
@@ -265,25 +265,25 @@ app.post('/api/integrations/search/web', async (c) => {
   }
 });
 
-app.post('/api/integrations/memory/add', async (c) => {
-  const body = await readJson<{ userId?: string; content?: string; metadata?: Record<string, unknown> }>(c);
-  if (!body?.userId || !body?.content) return c.json({ error: 'userId and content are required' }, 400);
+app.post('/api/integrations/memory/add', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ content?: string; metadata?: Record<string, unknown> }>(c);
+  if (!body?.content) return c.json({ error: 'content is required' }, 400);
   try {
     if (!integrationHub.mem0) return c.json({ error: 'Mem0 not configured' }, 503);
-    const success = await integrationHub.mem0.addMemory(body.userId, body.content, body.metadata);
+    const success = await integrationHub.mem0.addMemory(user.sub, body.content, body.metadata);
     return c.json({ success, ts: Date.now() });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Unknown error' }, 500);
   }
 });
 
-app.get('/api/integrations/memory/:userId', async (c) => {
-  const userId = c.req.param('userId');
+app.get('/api/integrations/memory', requireRole(['admin', 'user']), async (c) => {
+  const user = c.get('user');
   const limit = parseInt(c.req.query('limit') || '10');
-  if (!userId) return c.json({ error: 'userId is required' }, 400);
   try {
     if (!integrationHub.mem0) return c.json({ error: 'Mem0 not configured' }, 503);
-    const memories = await integrationHub.mem0.getMemories(userId, limit);
+    const memories = await integrationHub.mem0.getMemories(user.sub, limit);
     return c.json({ memories, ts: Date.now() });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : 'Unknown error' }, 500);
@@ -384,7 +384,7 @@ app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, asy
     if (!body?.prompt) return c.json({ error: 'prompt required' }, 400);
 
     // Prioritize user secret over system ENV
-    const apiKey = secretsManager.get(user.sub, 'GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    const apiKey = (await secretsManager.get(user.sub, 'GEMINI_API_KEY')) || process.env.GEMINI_API_KEY;
     
     if (!apiKey) return c.json({ error: 'GEMINI_API_KEY not configured' }, 503);
     const { GoogleGenAI } = await import('@google/genai');
@@ -413,15 +413,21 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
     const endpoints: Record<string, { url: string; key: string | undefined; model: string; secretKey: SecretKey }> = {
       openrouter: {
         url: 'https://openrouter.ai/api/v1/chat/completions',
-        key: secretsManager.get(user.sub, 'OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY,
+        key: (await secretsManager.get(user.sub, 'OPENROUTER_API_KEY')) || process.env.OPENROUTER_API_KEY,
         model: body.model ?? 'google/gemini-2.0-flash-001',
         secretKey: 'OPENROUTER_API_KEY',
       },
       deepseek: {
         url: 'https://api.deepseek.com/v1/chat/completions',
-        key: secretsManager.get(user.sub, 'DEEPSEEK_API_KEY') || process.env.DEEPSEEK_API_KEY,
+        key: (await secretsManager.get(user.sub, 'DEEPSEEK_API_KEY')) || process.env.DEEPSEEK_API_KEY,
         model: body.model ?? 'deepseek-chat',
         secretKey: 'DEEPSEEK_API_KEY',
+      },
+      opencode: {
+        url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+        key: (await secretsManager.get(user.sub, 'GEMINI_API_KEY')) || process.env.GEMINI_API_KEY,
+        model: body.model ?? 'gemini-2.0-flash',
+        secretKey: 'GEMINI_API_KEY',
       },
     };
 
@@ -478,7 +484,7 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
 // ─── Secrets Management ───────────────────────────────────────────────────────
 app.get('/api/secrets', requireRole(['admin', 'user']), async (c) => {
   const user = c.get('user');
-  const keys = secretsManager.list(user.sub);
+  const keys = await secretsManager.list(user.sub);
   return c.json({ 
     keys,
     masked: keys.reduce((acc, k) => {
@@ -510,10 +516,16 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 (async () => {
-  // Production safety: require a real API key
-  if (process.env.NODE_ENV === 'production' && (!NEXUS_API_KEY || NEXUS_API_KEY === 'nexus-alpha-dev-key')) {
-    console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
-    process.exit(1);
+  // Production safety: require a real API key and JWT secret
+  if (process.env.NODE_ENV === 'production') {
+    if (!NEXUS_API_KEY || NEXUS_API_KEY === 'nexus-alpha-dev-key') {
+      console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
+      process.exit(1);
+    }
+    if (!process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET === 'super-secret-jwt-token-with-at-least-32-characters-long') {
+      console.error('[CRITICAL] SUPABASE_JWT_SECRET must be set to a real project secret in production.');
+      process.exit(1);
+    }
   }
 
   const queueReady = await initPipelineQueue();

@@ -6,6 +6,7 @@
  */
 
 import { logAuditEvent } from './auditLogService';
+import { supabaseData } from '../services/supabaseClient';
 
 export type SecretKey =
   | "GEMINI_API_KEY"
@@ -16,15 +17,13 @@ export type SecretKey =
   | "SUPABASE_ANON_KEY"
   | "OPENCODE_API_KEY";
 
-// In-memory store (volatile). Backed by encryption-at-rest in production.
-const userSecrets = new Map<string, Map<SecretKey, string>>();
-
 export const secretsManager = {
   async set(userId: string, key: SecretKey, value: string): Promise<void> {
-    if (!userSecrets.has(userId)) {
-      userSecrets.set(userId, new Map());
-    }
-    userSecrets.get(userId)!.set(key, value);
+    const { error } = await supabaseData
+      .from('user_secrets')
+      .upsert({ user_id: userId, key, value, updated_at: new Date().toISOString() });
+
+    if (error) throw new Error(`Secret store error: ${error.message}`);
 
     await logAuditEvent({
       actor: userId,
@@ -35,12 +34,25 @@ export const secretsManager = {
     }).catch(() => {});
   },
 
-  get(userId: string, key: SecretKey): string | null {
-    return userSecrets.get(userId)?.get(key) || null;
+  async get(userId: string, key: SecretKey): Promise<string | null> {
+    const { data, error } = await supabaseData
+      .from('user_secrets')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', key)
+      .single();
+
+    if (error || !data) return null;
+    return data.value;
   },
 
   async remove(userId: string, key: SecretKey): Promise<void> {
-    userSecrets.get(userId)?.delete(key);
+    await supabaseData
+      .from('user_secrets')
+      .delete()
+      .eq('user_id', userId)
+      .eq('key', key);
+
     await logAuditEvent({
       actor: userId,
       action: 'secret_remove',
@@ -50,8 +62,13 @@ export const secretsManager = {
     }).catch(() => {});
   },
 
-  list(userId: string): SecretKey[] {
-    const map = userSecrets.get(userId);
-    return map ? Array.from(map.keys()) : [];
+  async list(userId: string): Promise<SecretKey[]> {
+    const { data, error } = await supabaseData
+      .from('user_secrets')
+      .select('key')
+      .eq('user_id', userId);
+
+    if (error || !data) return [];
+    return data.map(d => d.key as SecretKey);
   }
 };

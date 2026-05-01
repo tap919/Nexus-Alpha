@@ -52,9 +52,10 @@ async function authorizeTool(name: string, args: any): Promise<void> {
   const policy = TOOL_POLICIES[name];
   if (!policy) throw new Error(`Security Violation: Unrecognized tool "${name}"`);
 
-  // Default MCP identity for stdio-based calls
-  const actor = process.env.NEXUS_MCP_IDENTITY || "mcp-stdio-client";
-  const role = process.env.NEXUS_MCP_ROLE || "user";
+  // Request-Scoped Identity: Prioritize context passed via args
+  const context = args?.__nexus_context || {};
+  const actor = context.userId || process.env.NEXUS_MCP_IDENTITY || "mcp-stdio-client";
+  const role = context.role || process.env.NEXUS_MCP_ROLE || "user";
 
   // 1. Role Check
   const roles = ['user', 'agent-runner', 'admin', 'system'];
