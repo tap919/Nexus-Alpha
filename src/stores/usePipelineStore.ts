@@ -29,7 +29,7 @@ interface PipelineStore {
 // Private references that don't trigger re-renders
 let wsInstance: WebSocket | null = null;
 let wsCleanupFunc: (() => void) | null = null;
-let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null; // Fix Issue #6: Module-level timer
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null; // Fix Issue #6: Module-level timer (Verified)
 
 export const usePipelineStore = create<PipelineStore>((set, get) => ({
   executions: [],
