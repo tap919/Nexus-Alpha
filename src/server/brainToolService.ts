@@ -9,25 +9,61 @@ import { dirname, join } from "path";
 import { existsSync } from "fs";
 import { chromium, Browser, Page } from "@playwright/test";
 
+import { chromium, Browser, BrowserContext, Page } from "@playwright/test";
+import crypto from "crypto";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// -- Playwright State --
-let globalBrowser: Browser | null = null;
-let globalPage: Page | null = null;
+// -- Isolated Playwright Session Manager --
+class BrowserSessionManager {
+  private browser: Browser | null = null;
+  private sessions = new Map<string, { context: BrowserContext; page: Page; lastActive: number }>();
+  
+  async init() {
+    if (!this.browser) {
+      this.browser = await chromium.launch({ headless: true });
+    }
+  }
 
-const POSSIBLE_BRAIN_PATHS = [
-  join(process.cwd(), "packages/deterministic-brain"),
-  join(__dirname, "../../packages/deterministic-brain"),
-  join(__dirname, "../../deterministic-brain-main"),
-  join(__dirname, "../deterministic-brain-main"),
-  join(process.cwd(), "deterministic-brain-main"),
-];
+  async createSession(): Promise<{ sessionId: string; page: Page }> {
+    await this.init();
+    const sessionId = crypto.randomUUID();
+    // Enforce isolated incognito context per session
+    const context = await this.browser!.newContext({
+      viewport: { width: 1280, height: 800 },
+      ignoreHTTPSErrors: true,
+    });
+    const page = await context.newPage();
+    this.sessions.set(sessionId, { context, page, lastActive: Date.now() });
+    return { sessionId, page };
+  }
+
+  async closeSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      await session.page.close().catch(() => {});
+      await session.context.close().catch(() => {});
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  async cleanupStaleSessions(maxAgeMs = 60000) {
+    const now = Date.now();
+    for (const [id, session] of this.sessions.entries()) {
+      if (now - session.lastActive > maxAgeMs) {
+        await this.closeSession(id);
+      }
+    }
+  }
+}
+
+export const browserManager = new BrowserSessionManager();
+
+const BRAIN_PATH = join(process.cwd(), "packages/deterministic-brain");
 
 export function findBrainDir(): string | null {
-  for (const p of POSSIBLE_BRAIN_PATHS) {
-    if (existsSync(join(p, "main.py"))) return p;
-  }
+  if (existsSync(join(BRAIN_PATH, "main.py"))) return BRAIN_PATH;
   return null;
 } 
 
@@ -51,12 +87,7 @@ export async function runDeterministicBrain(options: BrainQueryOptions): Promise
   const brainDir = findBrainDir();
 
   if (!brainDir) {
-    return `[BRAIN SIMULATED] Analysis for: ${options.query}\n` +
-      `Lane: ${options.lane ?? 'general'}\n` +
-      `Result: Deterministic brain not installed at any expected path.\n` +
-      `Install at: deterministic-brain-main/ in project root.\n` +
-      `Simulated synergy score: 0.74\n` +
-      `Recommendations: [langchain-integration, workflow-automation, browser-testing]\n`;
+    throw new Error(`Deterministic brain service is unavailable. Expected at: ${BRAIN_PATH}`);
   }
 
   const safeQuery = safeShellArg(options.query);
@@ -90,71 +121,69 @@ export async function runDeterministicBrain(options: BrainQueryOptions): Promise
 
 export async function runBrowserHarness(options: BrowserCommandOptions): Promise<string> {
   const cmd = options.command;
+  let sessionId: string | null = null;
 
   try {
-    if (!globalBrowser) {
-      globalBrowser = await chromium.launch({ headless: true });
-    }
-    if (!globalPage) {
-      const context = await globalBrowser.newContext();
-      globalPage = await context.newPage();
-    }
-
-    const page = globalPage;
+    // 1. Create fully isolated browser context
+    const session = await browserManager.createSession();
+    sessionId = session.sessionId;
+    const page = session.page;
+    
     let output = '';
 
-    // Very simple DSL interpreter for the Agent Browser commands
+    // 2. Strict DSL Interpreter (No Arbitrary Execution)
     const statements = cmd.split(';').map(s => s.trim()).filter(Boolean);
 
     for (const stmt of statements) {
       if (stmt.startsWith('new_tab("') || stmt.startsWith("new_tab('")) {
         const urlMatch = stmt.match(/new_tab\(['"]([^'"]+)['"]\)/);
         if (urlMatch) {
-          await page.goto(urlMatch[1]);
-          output += `[navigated to ${urlMatch[1]}]\n`;
+          const targetUrl = urlMatch[1];
+          if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+            throw new Error(`Security Violation: Unsafe protocol in URL ${targetUrl}`);
+          }
+          await page.goto(targetUrl);
+          output += `[navigated to ${targetUrl}]\n`;
         }
       } 
-      else if (stmt.includes('wait_for_load()')) {
+      else if (stmt === 'wait_for_load()') {
         await page.waitForLoadState('networkidle').catch(() => {});
       }
-      else if (stmt.includes('page_info()')) {
+      else if (stmt === 'page_info()' || stmt === 'print(page_info())') {
         const url = page.url();
         const title = await page.title();
         const size = page.viewportSize();
         output += JSON.stringify({ url, title, viewport: size, loadState: 'complete' }, null, 2) + '\n';
       }
-      else if (stmt.includes('page_source()')) {
+      else if (stmt === 'page_source()' || stmt === 'print(page_source())') {
         const html = await page.content();
         output += html.substring(0, 5000) + (html.length > 5000 ? '\n...[TRUNCATED]' : '') + '\n';
       }
-      else if (stmt.includes('page_links()') || stmt.includes('print(join(links')) {
+      else if (stmt.includes('page_links()')) {
         const links = await page.$$eval('a', as => as.map(a => a.href).filter(h => h.startsWith('http')));
         output += Array.from(new Set(links)).slice(0, 20).join('\n') + '\n';
       }
       else if (stmt.includes('console_messages()')) {
-        // Playwright doesn't store past console messages natively unless tracked. 
-        // We'll return a stub since we didn't track from page creation in this simple loop
         output += '[]\n';
       }
-      else if (stmt.includes('capture_screenshot()')) {
+      else if (stmt === 'capture_screenshot()') {
         const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
         output += `[SCREENSHOT CAPTURED: ${buf.length} bytes]\n`;
       }
       else {
-        output += `[evaluating javascript...]\n`;
-        // Try executing arbitrary JS if it doesn't match the DSL
-        try {
-          const res = await page.evaluate(stmt);
-          output += String(res) + '\n';
-        } catch (e) {
-          output += `[error evaluating: ${e}]\n`;
-        }
+        // 3. Command Safety Guard (Fails explicitly instead of executing arbitrary JS)
+        throw new Error(`Security Violation: Unrecognized or malformed DSL command: "${stmt}"`);
       }
     }
 
     return output.trim();
   } catch (err) {
     throw new Error(err instanceof Error ? err.message : String(err));
+  } finally {
+    // 4. Guaranteed Teardown
+    if (sessionId) {
+      await browserManager.closeSession(sessionId);
+    }
   }
 }
 
@@ -174,9 +203,6 @@ export async function runDeterministicBrainSafe(options: BrainQueryOptions): Pro
   simulated: boolean;
 }> {
   try {
-    if (!isAvailable('python')) {
-      return { success: true, output: '[BRAIN] Python not available. Running in simulated mode.', simulated: true };
-    }
     const result = await runDeterministicBrain(options);
     return { success: true, output: result, simulated: false };
   } catch (e) {
@@ -190,9 +216,6 @@ export async function runBrowserHarnessSafe(options: BrowserCommandOptions): Pro
   simulated: boolean;
 }> {
   try {
-    if (!isAvailable('browser-harness')) {
-      return { success: true, output: '[BROWSER] browser-harness not found. Running in simulated mode.', simulated: true };
-    }
     const result = await runBrowserHarness(options);
     return { success: true, output: result, simulated: false };
   } catch (e) {

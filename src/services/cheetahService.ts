@@ -98,21 +98,13 @@ async function detectPythonEngine(): Promise<{ available: boolean; scriptPath?: 
     return { available: _pythonAvailable, scriptPath: _cheetahScriptPath ?? undefined };
   }
 
-  // Look for Cheetah autocoder.py in known locations
-  const candidates = [
-    path.join(process.cwd(), 'cheetah', 'autocoder_enhanced.py'),
-    path.join(process.cwd(), 'cheetah', 'autocoder.py'),
-    // Local Desktop copy (from Overlay-Game-Maker installation)
-    'C:\\Users\\User\\Desktop\\NCSound.com\\Overlay-Game-Maker-main\\overlayCheetah_v3_pro\\overlay_cheetah_v3_pro.py',
-  ];
+  const candidate = path.join(process.cwd(), 'cheetah', 'autocoder.py');
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      _pythonAvailable = true;
-      _cheetahScriptPath = candidate;
-      logger.info('CheetahService', `Python engine found at: ${candidate}`);
-      return { available: true, scriptPath: candidate };
-    }
+  if (existsSync(candidate)) {
+    _pythonAvailable = true;
+    _cheetahScriptPath = candidate;
+    logger.info('CheetahService', `Python engine found at: ${candidate}`);
+    return { available: true, scriptPath: candidate };
   }
 
   // Check if python3 / python is in PATH

@@ -1,7 +1,7 @@
 import { devices, defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: './tests',
   /* Run tests in a single worker to simplify server access in Windows environments */
   workers: 1,
   use: {
@@ -13,7 +13,21 @@ export default defineConfig({
   timeout: 60000,
   retries: 1,
   projects: [
-    { name: 'Desktop Chrome', use: { ...devices['Desktop Chrome'] } },
+    { 
+      name: 'CI: Critical', 
+      testMatch: /tests\/critical\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] } 
+    },
+    { 
+      name: 'CI: Integration', 
+      testMatch: /tests\/integration\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] } 
+    },
+    { 
+      name: 'CI: Quality', 
+      testMatch: /tests\/quality\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] } 
+    },
   ],
   webServer: {
     command: 'npm run server',
