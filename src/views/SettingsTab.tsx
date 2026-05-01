@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Settings, Activity, Users, Save, Shield, Cpu } from "lucide-react";
 import { BrainControlPanel } from "../features/settings/BrainControlPanel";
 import { IntegrationsPanel } from "../features/settings/IntegrationsPanel";
+import { ProjectRulesPanel } from "../features/settings/ProjectRulesPanel";
 import { useSettingsStore } from "../stores/useSettingsStore";
+import { ollamaService } from "../services/ollamaService";
 
 function PrivacyModePanel() {
   const [privacyMode, setPrivacyMode] = useState(() => {
@@ -11,6 +13,14 @@ function PrivacyModePanel() {
     }
     return false;
   });
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState('llama3.1');
+
+  useEffect(() => {
+    if (privacyMode) {
+      ollamaService.listModels().then(setOllamaModels);
+    }
+  }, [privacyMode]);
 
   const toggle = () => {
     const next = !privacyMode;
@@ -45,14 +55,34 @@ function PrivacyModePanel() {
 
         {privacyMode && (
           <div className="mt-3 p-3 rounded-lg border border-emerald-400/20 bg-emerald-400/5">
-            <div className="flex items-center gap-2 mb-2">
-              <Cpu size={12} className="text-emerald-400" />
-              <span className="text-[10px] font-mono text-emerald-400">Local AI Engine</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Cpu size={12} className="text-emerald-400" />
+                <span className="text-[10px] font-mono text-emerald-400">Local AI Engine (Ollama)</span>
+              </div>
+              <span className="text-[8px] font-mono text-emerald-400/50 uppercase tracking-tighter">Connected</span>
             </div>
-            <div className="text-[9px] text-[#4a4b50] space-y-1">
-              <p>Ollama provider for local LLM inference</p>
-              <p>Zero API keys required — all processing runs on your hardware</p>
-              <p className="text-emerald-400/70 mt-1">Endpoint: {typeof process !== 'undefined' && (process.env.OLLAMA_HOST || 'http://localhost:11434')}</p>
+            
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <label className="text-[9px] font-mono text-[#4a4b50] uppercase min-w-[60px]">Model</label>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="flex-1 text-[10px] font-mono bg-[#0a0a0c] border border-[#2d2e32] rounded px-2 py-1 text-white outline-none focus:border-emerald-500/50"
+                >
+                  {ollamaModels.length > 0 ? (
+                    ollamaModels.map(m => <option key={m} value={m}>{m}</option>)
+                  ) : (
+                    <option value="llama3.1">llama3.1 (default)</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="text-[9px] text-[#4a4b50] space-y-1">
+                <p>Zero API keys required — all processing runs on your hardware</p>
+                <p className="text-emerald-400/70 mt-1">Endpoint: {typeof process !== 'undefined' && (process.env.OLLAMA_HOST || 'http://localhost:11434')}</p>
+              </div>
             </div>
           </div>
         )}
@@ -283,6 +313,8 @@ export function SettingsTab() {
       />
 
       <PipelineConfigPanel />
+
+      <ProjectRulesPanel />
 
       <PrivacyModePanel />
 

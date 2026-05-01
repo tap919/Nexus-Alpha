@@ -189,9 +189,14 @@ export async function callGeminiWithFallback<T>(prompt: string, intent: string =
     try {
       const text = await callGeminiProxy(prompt);
       _isUsingMockData = false;
-      return JSON.parse(text) as unknown as T;
-    } catch {
-      logger.warn('geminiService', 'Server proxy failed, falling back');
+      try {
+        return JSON.parse(text) as unknown as T;
+      } catch (parseErr) {
+        logger.error('geminiService', 'Failed to parse JSON from proxy', parseErr);
+        throw new Error('Invalid JSON response from AI proxy');
+      }
+    } catch (e) {
+      logger.warn('geminiService', 'Server proxy failed, falling back', e);
     }
   }
   
@@ -240,7 +245,44 @@ export async function callGeminiWithFallback<T>(prompt: string, intent: string =
 }
 
 export async function callGemini<T>(prompt: string, retries = 3): Promise<T> {
-  return callGeminiWithFallback<T>(prompt);
+  let lastError: any;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await callGeminiWithFallback<T>(prompt);
+    } catch (err) {
+      lastError = err;
+      logger.warn('geminiService', `Retry ${i + 1}/${retries} failed`, err);
+    }
+  }
+  throw lastError || new Error('callGemini failed after all retries');
+}
+
+export async function callGeminiMultimodal(prompt: string, imageData: string, mimeType: string = "image/png"): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    logger.warn('geminiService', 'No API key for multimodal, using fallback');
+    return "Multimodal analysis requires a valid Gemini API key. [Mock: This looks like a UI design with a button and a list.]";
+  }
+
+  const { GoogleGenAI } = await import('@google/genai');
+  const ai = new GoogleGenAI({ apiKey });
+
+  try {
+    const model = ai.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: imageData,
+          mimeType
+        }
+      }
+    ]);
+    return result.response.text();
+  } catch (e) {
+    logger.error('geminiService', 'Multimodal API error', e);
+    return "Error processing image.";
+  }
 }
 
 // ─── Parallel Sub-calls ───────────────────────────────────────────────────────
@@ -342,7 +384,8 @@ export async function fetchNewsAndVideos(): Promise<{
 }> {
   let newsArticles: NewsItem[] = [];
   try {
-    const res = await fetch('https://gnews.io/api/v4/top-headlines?category=technology&lang=en&apikey=560ecca5e9e47a2b02bd4e85159b75ad');
+    const apiKey = process.env.GNEWS_API_KEY || '560ecca5e9e47a2b02bd4e85159b75ad';
+    const res = await fetch(`https://gnews.io/api/v4/top-headlines?category=technology&lang=en&apikey=${apiKey}`);
     if (res.ok) {
       const data = await res.json();
       if (data.articles) {

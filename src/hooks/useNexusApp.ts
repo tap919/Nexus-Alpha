@@ -1,24 +1,25 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData } from './useDashboardData';
 import { useAppStore } from '../stores/useAppStore';
 import { usePipelineStore } from '../stores/usePipelineStore';
 import { useWorkspaceStore } from '../stores/useWorkspaceStore';
-import { isLicensed } from '../services/licenseService';
 import { startWorkflow } from '../services/temporalClient';
-import { DashboardData, CLIStateData, PipelineExecutionData } from '../types';
+import { useCodeixStore } from '../services/codeixService';
+import { DashboardData } from '../types';
+import { useNexusAuth } from './useNexusAuth';
+import { useNexusStatus } from './useNexusStatus';
 
 export function useNexusApp() {
-  const [appLicensed, setAppLicensed] = useState(true);
-  const [latency, setLatency] = useState(42);
   const { data, isLoading: loading, refetch } = useDashboardData();
+  const { appLicensed } = useNexusAuth();
+  const { latency, nexusSystemStatus, setNexusSystemStatus } = useNexusStatus(loading, !!data);
+  
   const { 
     activeTab, 
     setActiveTab, 
     isProcessing, 
     setIsProcessing, 
-    nexusSystemStatus, 
-    setNexusSystemStatus,
     selectedRepos
   } = useAppStore();
   
@@ -37,28 +38,24 @@ export function useNexusApp() {
     });
   }, [queryClient]);
 
-  // Monitor latency
-  useEffect(() => {
-    if (!loading && data) {
-      setLatency(prev => {
-        const jitter = Math.floor(Math.random() * 10) - 5;
-        return Math.max(12, Math.min(150, prev + jitter));
-      });
-    }
-  }, [data, loading]);
-
-  useEffect(() => {
-    try {
-      setAppLicensed(isLicensed());
-    } catch {
-      setAppLicensed(false);
-    }
-  }, []);
-
   useEffect(() => {
     const cleanup = connectWebSocket();
     return () => { if (cleanup) cleanup(); };
   }, [connectWebSocket]);
+
+  // Initialize Codeix
+  useEffect(() => {
+    const initCodeix = async () => {
+      const codeix = useCodeixStore.getState();
+      const loaded = await codeix.loadFromDisk('.');
+      if (!loaded && !codeix.index && !codeix.isIndexing) {
+        console.log('[Nexus] Starting initial codebase indexing...');
+        await codeix.createIndex('.');
+        await codeix.saveIndex('.');
+      }
+    };
+    initCodeix();
+  }, []);
 
   // Autonomous runtime loop
   useEffect(() => {
@@ -96,7 +93,7 @@ export function useNexusApp() {
     }, 18000);
 
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, [activeTab, setNexusSystemStatus]);
 
   return {
     data,

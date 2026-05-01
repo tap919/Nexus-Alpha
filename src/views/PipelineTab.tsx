@@ -44,7 +44,7 @@ export const PipelineTab = ({
     if (!match) return;
     
     // If it's just owner/repo format, reconstruct the URL
-    const finalUrl = targetUrl.includes('github.com') ? targetUrl : \`https://github.com/\${targetUrl}\`;
+    const finalUrl = targetUrl.includes('github.com') ? targetUrl : `https://github.com/${targetUrl}`;
     const owner = match[1];
     const repo = match[2];
     
@@ -275,10 +275,10 @@ export const PipelineTab = ({
                     </p>
                     <button
                       onClick={() => handleIngestRepo(repo.name)}
-                      disabled={ingesting || ingestedRepos.some(r => \`\${r.owner}/\${r.repo}\` === repo.name)}
+                      disabled={ingesting || ingestedRepos.some(r => `${r.owner}/${r.repo}` === repo.name)}
                       className="w-full py-2 bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white border border-blue-500/20 hover:border-blue-500 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group/btn"
                     >
-                      {ingestedRepos.some(r => \`\${r.owner}/\${r.repo}\` === repo.name) ? (
+                      {ingestedRepos.some(r => `${r.owner}/${r.repo}` === repo.name) ? (
                         <>
                           <Check size={14} />
                           Ingested

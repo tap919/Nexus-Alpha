@@ -38,6 +38,8 @@ export interface SettingsState {
   integrations: IntegrationServiceItem[];
   pipeline: PipelineConfig;
   agents: AgentRegistryItem[];
+  localFirstMode: boolean;
+  ollamaEndpoint: string;
 }
 
 export interface PipelineConfig {

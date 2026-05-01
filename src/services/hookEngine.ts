@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { logger } from "../lib/logger";
 import type { HookConfig, HookResult } from "../types/hooks";
+import { safeExecLegacy } from "../lib/safeShell";
 
 const DATA_DIR = path.resolve(process.cwd(), "uploads", "nexus");
 const HOOKS_FILE = path.join(DATA_DIR, "hooks.json");
@@ -181,10 +182,8 @@ export async function executeHook(
   if (hook.script) {
     logs.push(`[HOOK:${hook.id}] Running script: ${hook.script}`);
     try {
-      const { execSync } = require("child_process");
-      const output = execSync(hook.script, {
+      const output = safeExecLegacy(hook.script, {
         timeout: 30000,
-        encoding: "utf-8",
         stdio: "pipe",
       });
       logs.push(`[HOOK:${hook.id}] Script output: ${output.trim().substring(0, 200)}`);
@@ -202,11 +201,9 @@ export async function executeHook(
   if (hook.condition) {
     logs.push(`[HOOK:${hook.id}] Evaluating condition: ${hook.condition}`);
     try {
-      const { execSync } = require("child_process");
       try {
-        execSync(hook.condition, {
+        safeExecLegacy(hook.condition, {
           timeout: 15000,
-          encoding: "utf-8",
           stdio: "pipe",
         });
         logs.push(`[HOOK:${hook.id}] Condition passed`);

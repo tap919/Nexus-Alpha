@@ -1,5 +1,5 @@
 // Node.js polyfills for browser - loaded FIRST
-console.log('=== POLYFILL LOADING ===');
+
 
 (function() {
   // Save original descriptors
@@ -65,5 +65,5 @@ console.log('=== POLYFILL LOADING ===');
     };
   }
   
-  console.log('=== POLYFILL COMPLETE ===');
+  
 })();

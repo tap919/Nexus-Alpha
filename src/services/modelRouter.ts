@@ -7,6 +7,8 @@
  */
 
 import { callGeminiProxy } from "./apiClient";
+import { ollamaService } from "./ollamaService";
+import { usePricingStore } from "./pricingService";
 import { logger } from "../lib/logger";
 
 export type Provider = "gemini" | "openrouter" | "deepseek" | "opencode" | "ollama";
@@ -203,9 +205,32 @@ export async function executeWithRouting(
 ): Promise<string> {
   const decision = routeTask(taskType, undefined, context);
 
-  // Right now we proxy everything through Gemini as the central endpoint
-  // In a full implementation, each provider would have its own proxy
-  return callGeminiProxy(prompt, decision.modelId);
+  if (decision.provider === 'ollama') {
+    try {
+      return await ollamaService.generate({
+        model: decision.modelId,
+        prompt: prompt,
+      });
+    } catch (error) {
+      logger.warn("ModelRouter", `Ollama failed, falling back to Gemini: ${error}`);
+      return callGeminiProxy(prompt, "gemini-2.0-flash");
+    }
+  }
+
+  // Fallback to Gemini proxy
+  const result = await callGeminiProxy(prompt, decision.modelId);
+
+  // Track usage
+  try {
+    usePricingStore.getState().trackUsage({
+      tokens: prompt.length / 4 + result.length / 4, // Simple estimation
+      model: decision.modelId,
+      provider: decision.provider,
+      complexity: classifyTaskComplexity(taskType, context),
+    });
+  } catch (e) { /* ignore */ }
+
+  return result;
 }
 
 export function getAvailableModels(): ProviderModel[] {

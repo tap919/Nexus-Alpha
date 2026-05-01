@@ -204,8 +204,8 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
         const data = await res.json();
         set({ hooks: data.hooks || [], hookStats: data.stats || null });
       }
-    } catch {
-      // Hooks API unavailable
+    } catch (err) {
+      console.error('[PipelineStore] Failed to fetch hooks:', err);
     }
   },
 
@@ -219,7 +219,9 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       if (res.ok) {
         get().fetchHooks();
       }
-    } catch {}
+    } catch (err) {
+      console.error('[PipelineStore] Failed to add hook:', err);
+    }
   },
 
   toggleHook: async (id) => {
@@ -228,7 +230,9 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       if (res.ok) {
         get().fetchHooks();
       }
-    } catch {}
+    } catch (err) {
+      console.error('[PipelineStore] Failed to toggle hook:', err);
+    }
   },
 
   removeHook: async (id) => {
@@ -237,7 +241,9 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       if (res.ok) {
         get().fetchHooks();
       }
-    } catch {}
+    } catch (err) {
+      console.error('[PipelineStore] Failed to remove hook:', err);
+    }
   },
 
   fetchFixHistory: async () => {
@@ -247,6 +253,8 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
         const data = await res.json();
         set({ fixHistory: data.history || [] });
       }
-    } catch {}
+    } catch (err) {
+      console.error('[PipelineStore] Failed to fetch fix history:', err);
+    }
   },
 }));

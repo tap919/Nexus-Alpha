@@ -20,6 +20,7 @@ import { OpenSourceWidget } from '../features/overview/OpenSourceWidget';
 import { NewsCard } from '../features/overview/NewsCard';
 import { SynergyInsightsWidget } from '../features/overview/SynergyInsightsWidget';
 import { HarvestIntelligenceWidget } from '../features/overview/HarvestIntelligenceWidget';
+import { NexusIntelligenceWidget } from '../features/overview/NexusIntelligenceWidget';
 import { cn } from '../lib/utils';
 import { useNexusStats } from '../hooks/useNexusStats';
 import type { DashboardData } from '../types';
@@ -32,10 +33,10 @@ interface OverviewTabProps {
 }
 
 const ENGINE_OPTIMIZATIONS = [
+  { label: 'Serena Context Engine', value: 'Active', desc: 'Unified MCP context management and prompt enrichment.', icon: Share2, color: 'text-indigo-400' },
+  { label: 'Codeix Indexer', value: 'Portable', desc: 'Language-agnostic symbol indexing with Bloom filters.', icon: Database, color: 'text-blue-400' },
   { label: 'Semantic Compression', value: '94.2%', desc: 'RAG vector retrieval optimization for dense browser traces.', icon: Database, color: 'text-blue-400' },
-  { label: 'Path Parallelization', value: '12ms', desc: 'Playwright E2E execution speed-up via cluster sharding.', icon: Activity, color: 'text-amber-400' },
   { label: 'Model Optimization', value: 'Locked', desc: 'Model parameters optimized for low-latency autonomous browsing.', icon: Cpu, color: 'text-emerald-400' },
-  { label: 'MCP Context Bridge', value: '8 Sources', desc: 'Real-time context sync via open-source Model Context Protocol.', icon: Share2, color: 'text-purple-400' },
 ] as const;
 
 const QUICK_ACTIONS = [
@@ -139,6 +140,11 @@ export const OverviewTab = ({ data, nexusSystemStatus, onTabChange }: OverviewTa
     {/* Trend & Synergy Insights */}
     <div className="mb-12">
       <TrendInsightsDashboard />
+    </div>
+
+    {/* Nexus Intelligence (Codeix & Serena) */}
+    <div className="mb-12">
+      <NexusIntelligenceWidget />
     </div>
 
     {/* Engine Optimizations */}

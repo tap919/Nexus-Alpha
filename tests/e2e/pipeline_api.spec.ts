@@ -9,10 +9,10 @@ test.describe('Real Tools API', () => {
       data: { tool: 'build' },
       headers: { 
         'Content-Type': 'application/json',
-        'x-api-key': 'nexus-alpha-dev-key'
+        'x-nexus-api-key': process.env.NEXUS_API_KEY || 'nexus-alpha-dev-key'
       },
     });
-    expect(resp.ok()).toBeTruthy();
+    expect(resp.ok).toBeTruthy();
     const json = await resp.json();
     expect(json).toHaveProperty('tool', 'build');
     expect(json).toHaveProperty('result');
@@ -24,10 +24,10 @@ test.describe('Real Tools API', () => {
       data: { tool: 'audit' },
       headers: { 
         'Content-Type': 'application/json',
-        'x-api-key': 'nexus-alpha-dev-key'
+        'x-nexus-api-key': process.env.NEXUS_API_KEY || 'nexus-alpha-dev-key'
       },
     });
-    expect(resp.ok()).toBeTruthy();
+    expect(resp.ok).toBeTruthy();
     const json = await resp.json();
     expect(json).toHaveProperty('tool', 'audit');
     expect(json).toHaveProperty('result');

@@ -5,6 +5,13 @@ import { DEFAULT_BRAIN_CONFIG, INTEGRATION_SERVICE_DEFS, DEFAULT_PIPELINE_CONFIG
 interface SettingsStore extends SettingsState {
   loading: boolean;
   error: string | null;
+  // Personalization
+  theme: 'dark' | 'light' | 'system';
+  fontSize: number;
+  fontFamily: string;
+  reducedMotion: boolean;
+  hideAdvancedFeatures: boolean;
+  favorites: string[];
   fetchBrainConfig: () => Promise<void>;
   fetchBrainStatus: () => Promise<void>;
   fetchIntegrations: () => Promise<void>;
@@ -12,6 +19,15 @@ interface SettingsStore extends SettingsState {
   fetchAgents: () => Promise<void>;
   updateBrainConfig: (lanes: BrainConfig["lanes"]) => Promise<boolean>;
   updatePipelineConfig: (cfg: Partial<PipelineConfig>) => Promise<boolean>;
+  setLocalFirstMode: (enabled: boolean) => void;
+  setOllamaEndpoint: (endpoint: string) => void;
+  // Personalization actions
+  setTheme: (theme: 'dark' | 'light' | 'system') => void;
+  setFontSize: (size: number) => void;
+  setFontFamily: (family: string) => void;
+  toggleReducedMotion: () => void;
+  toggleAdvancedFeatures: () => void;
+  toggleFavorite: (featureId: string) => void;
   refreshAll: () => Promise<void>;
 }
 
@@ -23,6 +39,15 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   integrations: INTEGRATION_SERVICE_DEFS.map((d) => ({ ...d, connected: false, configured: false })),
   pipeline: DEFAULT_PIPELINE_CONFIG,
   agents: [],
+  localFirstMode: false,
+  ollamaEndpoint: 'http://localhost:11434',
+  // Personalization defaults
+  theme: 'dark' as const,
+  fontSize: 14,
+  fontFamily: 'Inter, system-ui, sans-serif',
+  reducedMotion: false,
+  hideAdvancedFeatures: false,
+  favorites: [],
   loading: false,
   error: null,
 
@@ -115,6 +140,53 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     } catch {
       return false;
     }
+  },
+
+  setLocalFirstMode: (enabled: boolean) => {
+    set({ localFirstMode: enabled });
+  },
+
+  setOllamaEndpoint: (endpoint: string) => {
+    set({ ollamaEndpoint: endpoint });
+  },
+
+  // Personalization actions
+  setTheme: (theme: 'dark' | 'light' | 'system') => {
+    set({ theme });
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  },
+
+  setFontSize: (size: number) => {
+    set({ fontSize: size });
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.fontSize = `${size}px`;
+    }
+  },
+
+  setFontFamily: (family: string) => {
+    set({ fontFamily: family });
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.fontFamily = family;
+    }
+  },
+
+  toggleReducedMotion: () => {
+    set((state) => ({ reducedMotion: !state.reducedMotion }));
+  },
+
+  toggleAdvancedFeatures: () => {
+    set((state) => ({ hideAdvancedFeatures: !state.hideAdvancedFeatures }));
+  },
+
+  toggleFavorite: (featureId: string) => {
+    set((state) => {
+      const favorites = state.favorites.includes(featureId)
+        ? state.favorites.filter(id => id !== featureId)
+        : [...state.favorites, featureId];
+      return { favorites };
+    });
   },
 
   refreshAll: async () => {

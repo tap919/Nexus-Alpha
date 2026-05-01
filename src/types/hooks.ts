@@ -13,6 +13,7 @@ export interface HookConfig {
   pipelinePhase: string;
   action: HookAction;
   script?: string;
+  command?: string;
   condition?: string;
   enabled: boolean;
 }
@@ -24,6 +25,8 @@ export interface HookResult {
   pipelinePhase: string;
   passed: boolean;
   blocked: boolean;
+  success: boolean;
+  output?: string;
   warnings: string[];
   logs: string[];
   durationMs: number;

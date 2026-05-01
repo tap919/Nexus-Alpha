@@ -17,6 +17,7 @@ import { runDeterministicBrain, runBrowserHarness } from "./brainToolService";
 import { runQualityGates, getBuildHistory, getLatestScore } from "../services/vibeCoderService";
 import { buildGraph, getGraph, queryGraph, getGraphSummary, graphAvailable } from "../services/graphifyService";
 import { encodeToToon, compressJson, getToonStats } from "../services/toonService";
+import { useGuardrailsStore } from "../services/guardrailsService";
 
 const server = new Server(
   { name: "nexus-alpha-mcp", version: "1.0.0" },
@@ -372,6 +373,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "browser_automation": {
       const { command } = args as { command: string };
+      const { validateAction } = useGuardrailsStore.getState();
+      const { allowed, reason } = validateAction('command', command);
+      if (!allowed) throw new Error(reason);
+
       try {
         const result = await runBrowserHarness({ command });
         return {
@@ -386,6 +391,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "deterministic_brain": {
       const { query, lane, verbose } = args as { query: string; lane?: string; verbose?: boolean };
+      const { validateAction } = useGuardrailsStore.getState();
+      const { allowed, reason } = validateAction('command', query); // Brain queries can trigger commands
+      if (!allowed) throw new Error(reason);
+
       try {
         const result = await runDeterministicBrain({ query, lane: lane as "coding" | "business_logic" | "agent_brain" | "tool_calling" | "cross_domain" | undefined, verbose });
         return {

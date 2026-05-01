@@ -6,6 +6,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Zap, Activity, RefreshCcw, Cpu } from 'lucide-react';
 import { NotificationPanel } from '../components/NotificationPanel';
+import { PresenceBar } from '../components/PresenceBar';
 import { useState, useEffect } from 'react';
 
 interface HeaderProps {
@@ -72,6 +73,7 @@ export const Header = ({ loading, onRefresh }: HeaderProps) => {
           REFRESH
         </button>
         <NotificationPanel />
+        <PresenceBar />
       </div>
     </header>
   );

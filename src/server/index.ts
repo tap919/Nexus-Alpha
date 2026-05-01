@@ -15,6 +15,7 @@ import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import { runAutomatedPipeline } from "../services/pipelineService";
+import CodingAgentService from "../services/codingAgentService";
 import type { PipelineExecution } from "../types";
 import { integrationHub } from "../services/integrationService";
 import { runDeterministicBrain, runBrowserHarness, findBrainDir, isAvailable } from "./brainToolService";
@@ -38,10 +39,13 @@ import { getBrainStatus, getBrainHealth, updateBrainConfig, reloadBrain } from "
 import { fetchGitHubTrending, fetchAIVideos } from "../services/realTimeDataService";
 import { cloneRepo } from "../services/repoLoaderService";
 import { assessAgentFolder } from "../services/agentAssessmentService";
-import { runBuildCommand, runAuditCommand } from "./realTools";
+import { runBuildCommand, runAuditCommand, runLintCommand, runTestsCommand } from "./realTools";
 import { initLogService, getExecutionLog } from "./logService";
 import { initAuditService, getAuditLogs } from "./auditLogService";
 import { listPullRequests, updateHunkStatus } from "../services/prAgentService";
+import { listAppFiles, readAppFile, writeAppFile } from "./editorService";
+import { getMarketplaceExtensions, searchMarketplace, incrementDownloads } from "./marketplaceService";
+import { proxyRouter, setProxyKeys } from './proxyRoutes';
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -95,152 +99,8 @@ const SERVER_API_KEYS = {
   openai: process.env.OPENAI_API_KEY ?? '',
 } as const;
 
-function requireKey(key: string): string {
-  if (!key) throw new Error('API key not configured on server');
-  return key;
-}
-
-// ─── Gemini proxy ────────────────────────────────────────────────────────────
-app.post('/api/proxy/gemini', async (req, res) => {
-  try {
-    const key = requireKey(SERVER_API_KEYS.gemini);
-    const { prompt, model } = req.body as { prompt: string; model?: string };
-
-    if (!prompt) return res.status(400).json({ error: 'prompt required' });
-
-    const { GoogleGenAI } = await import('@google/genai');
-    const ai = new GoogleGenAI({ apiKey: key });
-    const result = await ai.models.generateContent({
-      model: model ?? 'gemini-2.0-flash',
-      contents: prompt,
-    });
-
-    res.json({ text: result.text });
-  } catch (e) {
-    res.status(503).json({ error: e instanceof Error ? e.message : 'Gemini unavailable' });
-  }
-});
-
-// ─── GitHub proxy ────────────────────────────────────────────────────────────
-app.get('/api/proxy/github/*', async (req, res) => {
-  try {
-    const token = SERVER_API_KEYS.github || undefined;
-    const ghPath = req.params[0] as string;
-
-    // Restrict to read-only endpoints
-    if (!ghPath.startsWith('repos/') && !ghPath.startsWith('search/') && !ghPath.startsWith('users/')) {
-      return res.status(403).json({ error: 'Proxied path not allowed' });
-    }
-
-    const headers: Record<string, string> = {
-      Accept: 'application/vnd.github.v3+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-    try {
-      const ghRes = await fetch(`https://api.github.com/${ghPath}`, { headers, signal: controller.signal });
-      if (!ghRes.ok) return res.status(ghRes.status).json({ error: ghRes.statusText });
-      res.json(await ghRes.json());
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch (e) {
-    res.status(503).json({ error: e instanceof Error ? e.message : 'GitHub unavailable' });
-  }
-});
-
-// ─── CLI proxy (OpenRouter / DeepSeek streaming) ─────────────────────────────
-app.post('/api/proxy/cli/stream', async (req, res) => {
-  try {
-    const { provider, messages, model } = req.body as {
-      provider: 'openrouter' | 'deepseek' | 'opencode';
-      messages: Array<{ role: string; content: string }>;
-      model?: string;
-    };
-
-    if (!provider || !messages) return res.status(400).json({ error: 'provider and messages required' });
-
-    const endpoints: Record<string, { url: string; key: string; model: string }> = {
-      openrouter: {
-        url: 'https://openrouter.ai/api/v1/chat/completions',
-        key: requireKey(SERVER_API_KEYS.openrouter),
-        model: model ?? 'google/gemini-2.0-flash-001',
-      },
-      deepseek: {
-        url: 'https://api.deepseek.com/v1/chat/completions',
-        key: requireKey(SERVER_API_KEYS.deepseek),
-        model: model ?? 'deepseek-chat',
-      },
-      opencode: {
-        url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${requireKey(SERVER_API_KEYS.gemini)}`,
-        key: '',
-        model: 'gemini-2.0-flash',
-      },
-    };
-
-    const cfg = endpoints[provider];
-    if (!cfg) return res.status(400).json({ error: `Unknown provider: ${provider}` });
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
-    const body = provider === 'opencode'
-      ? JSON.stringify({ contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })) })
-      : JSON.stringify({ model: cfg.model, messages, stream: true });
-
-    const fetchRes = await fetch(cfg.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cfg.key ? { 'Authorization': `Bearer ${cfg.key}` } : {}),
-      },
-      body,
-      signal: controller.signal,
-    });
-
-    if (!fetchRes.ok) {
-      res.write(`data: [ERROR] HTTP ${fetchRes.status}: ${fetchRes.statusText}\n\n`);
-      res.end();
-      return;
-    }
-
-    const reader = fetchRes.body?.getReader();
-    if (!reader) { res.end(); return; }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          res.write(`${line}\n\n`);
-        }
-      }
-    }
-
-    if (buffer) res.write(`${buffer}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (e) {
-    if (!res.headersSent) {
-      res.status(503).json({ error: e instanceof Error ? e.message : 'Stream unavailable' });
-    } else {
-      res.end();
-    }
-  }
-});
+setProxyKeys(SERVER_API_KEYS);
+app.use('/api/proxy', proxyRouter);
 
 // ─── Rate Limiting for API routes ─────
 app.use("/api/", apiLimiter);
@@ -295,6 +155,19 @@ broadcastService.setHandler(broadcast);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", wsClients: clients.size, ts: Date.now() });
+});
+
+// MVP: Coding generation endpoint
+app.post("/api/coding/generate", async (req, res) => {
+  try {
+    const { description } = req.body as { description: string };
+    if (!description) return res.status(400).json({ error: 'description required' });
+    const svc = new CodingAgentService();
+    const result = await svc.generateApp({ description });
+  res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
 });
 
 /** POST /api/pipeline/run - trigger a pipeline and stream updates via WS */
@@ -783,6 +656,30 @@ app.post("/api/checkpoints", (req, res) => {
     const checkpoint = createCheckpoint(label, metadata);
     if (!checkpoint) return res.status(500).json({ error: "Checkpoint creation failed" });
     res.json({ checkpoint });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+// ─── MARKETPLACE API ──────────────────────────────────────────────────────────
+
+app.get("/api/marketplace/extensions", (req, res) => {
+  try {
+    const query = req.query.q as string;
+    const extensions = query ? searchMarketplace(query) : getMarketplaceExtensions();
+    res.json({ extensions });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
+app.post("/api/marketplace/extensions/:name/install", (req, res) => {
+  try {
+    const success = incrementDownloads(req.params.name);
+    if (!success) {
+      return res.status(404).json({ error: "Extension not found" });
+    }
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Unknown error" });
   }
@@ -1549,9 +1446,9 @@ app.get("/api/toon/stats", (_req, res) => {
 
 // ─── CODING AGENT API ─────────────────────────────────────────────────────────────
 
-import { codingAgent } from "../coding-agent/codingAgentService";
-import { realPipeline } from "../coding-agent/realPipeline";
-import { deploy, checkDeployAvailability } from "../coding-agent/deployer";
+import { codingAgent } from "../core/agents/codingAgentService";
+import { realPipeline } from "../core/agents/realPipeline";
+import { deploy, checkDeployAvailability } from "../core/agents/deployer";
 
 /** POST /api/coding-agent/generate — Generate a full application from a prompt */
 app.post("/api/coding-agent/generate", strictLimiter, async (req, res) => {
@@ -1712,7 +1609,7 @@ app.post("/api/composer/apply", strictLimiter, async (req, res) => {
     const fs = await import("fs/promises");
     await fs.writeFile(fullPath, content, "utf-8");
     
-    logger.info("Composer", `Applied change to ${filePath}`);
+    console.log("[Composer] Applied change to", filePath);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });

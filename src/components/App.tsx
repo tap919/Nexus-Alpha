@@ -23,6 +23,15 @@ const SettingsTab = lazy(() => import('../views/SettingsTab').then(m => ({ defau
 const ActivityTab = lazy(() => import('../views/ActivityTab').then(m => ({ default: m.ActivityTab })));
 const HistoryTab = lazy(() => import('../views/HistoryTab').then(m => ({ default: m.HistoryTab })));
 const AuditTab = lazy(() => import('../views/AuditTab').then(m => ({ default: m.AuditTab })));
+const MissionControlTab = lazy(() => import('../views/MissionControlTab'));
+const EditorTab = lazy(() => import('../views/EditorTab'));
+const ChangesTab = lazy(() => import('../views/ChangesTab'));
+const MemoryTab = lazy(() => import('../views/MemoryTab'));
+const PreviewTab = lazy(() => import('../features/preview/MultimodalPreview').then(m => ({ default: m.MultimodalPreview })));
+const ExtensionsTab = lazy(() => import('../features/extensions/ExtensionsPanel').then(m => ({ default: m.ExtensionsPanel })));
+const SystemTab = lazy(() => import('../features/system/SystemPanel').then(m => ({ default: m.SystemPanel })));
+const AgentEvalTab = lazy(() => import('../views/AgentEvalTab').then(m => ({ default: m.AgentEvalTab })));
+const MagicTab = lazy(() => import('../features/composer/MagicComposer').then(m => ({ default: m.MagicComposer })));
 
 export default function App() {
   const {
@@ -38,23 +47,21 @@ export default function App() {
     refetch
   } = useNexusApp();
 
-  if (!appLicensed) return <LicenseGate />;
+  if (!appLicensed) return <LicenseGate onActivate={() => {}} />;
 
   return (
     <div className="flex h-screen bg-[#0A0A0B] text-gray-300 font-sans overflow-hidden">
       <GlobalCommandBar />
       
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
 
       <main className="flex-1 flex flex-col relative overflow-hidden">
         {/* Top Glow Decor */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
         
         <Header 
-          status={nexusSystemStatus} 
-          latency={latency} 
-          activeRun={activeRun}
-          selectedRepos={selectedRepos}
+          loading={loading}
+          onRefresh={refetch}
         />
 
         <div className="flex-1 overflow-y-auto relative z-10">
@@ -69,14 +76,23 @@ export default function App() {
                 </motion.div>
               </div>
             }>
-              {activeTab === 'Overview' && <OverviewTab />}
+              {activeTab === 'Overview' && <OverviewTab data={data} nexusSystemStatus={nexusSystemStatus} onTabChange={setActiveTab} />}
               {activeTab === 'Composer' && <ComposerTab />}
               {activeTab === 'Command Center' && <CommandCenterTab />}
               {activeTab === 'Pipeline' && <PipelineTab />}
               {activeTab === 'Activity' && <ActivityTab />}
               {activeTab === 'History' && <HistoryTab />}
               {activeTab === 'Audit' && <AuditTab />}
+              {activeTab === 'Mission Control' && <MissionControlTab />}
+              {activeTab === 'Editor' && <EditorTab />}
+              {activeTab === 'Changes' && <ChangesTab />}
+              {activeTab === 'Memory' && <MemoryTab />}
+              {activeTab === 'Preview' && <PreviewTab />}
+              {activeTab === 'Extensions' && <ExtensionsTab />}
+              {activeTab === 'System' && <SystemTab />}
               {activeTab === 'Settings' && <SettingsTab />}
+              {activeTab === 'Agent Eval' && <AgentEvalTab />}
+              {activeTab === 'Magic' && <MagicTab />}
             </Suspense>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { runAgentGraph } from '../../agents/graph';
+import { runAgentGraph } from '../../core/agents/graph';
 import { supabaseData } from '../../services/supabaseClient';
 
 interface AgentInput {

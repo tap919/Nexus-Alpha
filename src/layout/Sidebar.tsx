@@ -1,12 +1,16 @@
 import { useState, type ElementType } from 'react';
-import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield } from 'lucide-react';
+import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield, Brain, FileCode, GitCompare, Database, Eye, Package, Cpu, Wand2, Trophy } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SystemManifest } from './SystemManifest';
 
-export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit';
+export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit' | 'Mission Control' | 'Editor' | 'Changes' | 'Memory' | 'Preview' | 'Extensions' | 'System' | 'Agent Eval' | 'Magic';
 
 const PRIMARY_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Sparkles, label: 'Composer' },
+  { icon: FileCode, label: 'Editor' },
+  { icon: Wand2, label: 'Magic' },
+  { icon: Database, label: 'Memory' },
+  { icon: Eye, label: 'Preview' },
 ];
 
 const ADVANCED_ITEMS: { icon: ElementType; label: TabName }[] = [
@@ -15,8 +19,13 @@ const ADVANCED_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Zap, label: 'Activity' },
   { icon: History, label: 'History' },
   { icon: Shield, label: 'Audit' },
+  { icon: Brain, label: 'Mission Control' },
+  { icon: GitCompare, label: 'Changes' },
   { icon: Terminal, label: 'Command Center' },
   { icon: Settings, label: 'Settings' },
+  { icon: Package, label: 'Extensions' },
+  { icon: Cpu, label: 'System' },
+  { icon: Trophy, label: 'Agent Eval' },
 ];
 
 interface SidebarProps {
