@@ -7,14 +7,13 @@
 ## Core Features
 
 - **AI-Native IDE Experience** — Includes a Monaco-based browser editor (`@monaco-editor/react`), real-time collaborative editing via Yjs (CRDTs), and an embedded full terminal (`xterm.js`).
-- **Cheetah V3 Autocoder** — State-of-the-art Python-based code generation engine bridged with a TypeScript-native fallback for autonomous architectural expansion and multi-file synthesis.
-- **Durable Workflows** — Powered by Temporal.io (`@temporalio/client`, `worker`, `workflow`) for resilient, long-running asynchronous orchestration.
-- **Job Queues & Resiliency** — Utilizes BullMQ (Redis-backed) for pipeline execution and Opossum for robust circuit-breaker patterns across external API calls.
-- **Advanced LLM Orchestration** — Integrates LangChain, LangChain Community, and LangChain OpenAI for complex, multi-agent reasoning chains.
-- **Local Embedded RAG** — Leverages Qdrant as a vector database and Xenova Transformers for in-browser local embeddings, ensuring highly relevant generation context.
-- **Hono Backend Platform** — High-performance backend routing built on Hono, featuring strict rate-limiting, JWT/API Key dual-authentication, and robust proxy safeguards.
-- **Multi-Provider CLI** — Switch between OpenCode, OpenRouter, and DeepSeek providers seamlessly from within the app.
-- **Self-Healing Loop** — Autonomous auto-fix loops with strict security gating (`NEXUS_ALLOW_AUTO_FIX`), granular RCE command allowlists, and atomic fix-history management.
+- **Multi-File Planning Engine** — Powered by the **PlannerAgent**, this engine decomposes complex prompts into structured, multi-file implementation plans before execution.
+- **Architectural Review UI** — A dedicated review interface for inspecting and approving agent-led code modifications, ensuring human-in-the-loop control.
+- **Graphify RAG** — Semantic codebase discovery using a knowledge graph integration (nodes, edges, communities) to reduce token usage and improve code recall accuracy.
+- **Performance-Native Codegen** — Real-time performance profiling (Lighthouse vitals) integrated into the generation loop to ensure high-quality, optimized output.
+- **Enterprise Audit & Hardening** — Comprehensive administrative dashboard for monitoring agent actions, security events, and cost, backed by zero-trust BOLA safeguards.
+- **Self-Healing Loop (Auto-Fix 2.0)** — Autonomous repair engine with visual regression awareness and performance-based self-optimization.
+- **Hono Backend Platform** — High-performance, authenticated backend proxies for all AI and system operations, featuring strict rate-limiting and audit logging.
 - **Desktop Ready** — Pre-configured Electron build target for native desktop deployment.
 
 ***
@@ -29,9 +28,10 @@
 | Backend Core | **Hono**, Express (Legacy Adapter), WebSocket (`ws`) |
 | Workflows & Queues | Temporal.io, BullMQ |
 | Autocoder | **Overlay Cheetah V3** (Python/Jinja2 + TS Fallback) |
-| AI / LLMs | Google Gemini (`@google/genai`), LangChain, Transformers.js |
-| Vector DB (RAG) | Qdrant (`@qdrant/js-client-rest`) |
-| Resiliency & Ops | Opossum (Circuit Breaker), Pino (Logging) |
+| AI / LLMs | Google Gemini (`@google/genai`), LangChain, Ollama (Local) |
+| Vector DB (RAG) | **Graphify** (Knowledge Graph), Qdrant |
+| Resiliency & Ops | Opossum (Circuit Breaker), **Vitals Service** (Lighthouse) |
+| Security | **BOLA Guard** (Ownership-based ACL), JWT, Audit Logging |
 | Code Quality | Biome (Linter/Formatter) |
 | Database/Auth | Supabase |
 | Testing / Desktop | Playwright / Electron |
@@ -98,14 +98,10 @@ npm run mcp
 |---|---|---|
 | `GEMINI_API_KEY` | ✅ Yes | Google Gemini API key for all AI features |
 | `NEXUS_API_KEY` | ✅ Yes | Server-to-server API authentication key (required in production) |
+| `SUPABASE_JWT_SECRET` | ✅ Yes | Secret key for JWT verification (enforces Zero-Trust RBAC) |
 | `NEXUS_ALLOW_AUTO_FIX` | Optional | Set to `true` to enable unsandboxed destructive pipeline operations |
-| `GITHUB_TOKEN` | Optional | GitHub PAT for live repo data and workflow triggers (repo + workflow scopes) |
-| `OPENROUTER_API_KEY` | Optional | OpenRouter key for multi-model CLI provider |
-| `DEEPSEEK_API_KEY` | Optional | DeepSeek key for CLI provider |
-| `SUPABASE_URL` | Optional | Supabase project URL for auth |
-| `SUPABASE_ANON_KEY` | Optional | Supabase anon key for auth |
-| `PORT` | Optional | HTTP server port (default: `3002`) |
 | `MAX_WS_CLIENTS` | Optional | Connection cap for WebSocket server |
+| `PORT` | Optional | HTTP server port (default: `3002`) |
 
 > ⚠️ Never commit `.env.local` to version control. It is already listed in `.gitignore`.
 
