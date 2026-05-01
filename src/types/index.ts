@@ -6,7 +6,7 @@
  */
 
 export type { RAGContextData, BrowserObservationData, BrowserHistoryItemData } from './browser';
-export type { CustomAgentData, CLIStateData } from './agents';
+export type { CustomAgentData, CLIStateData, AgentAssessment } from './agents';
 export type {
   BuildStepData,
   E2EResultData,

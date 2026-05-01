@@ -12,10 +12,6 @@ interface PipelineStore {
   hookStats: { total: number; enabled: number; byPhase: Record<string, number>; byPipelinePhase: Record<string, number> } | null;
   fixHistory: Array<{ executionId: string; phase: string; timestamp: string; fixed: boolean; attempts: number; diagnosis: string }>;
   
-  // Internal refs (not part of the state proper but managed by the store)
-  _ws: WebSocket | null;
-  _wsCleanup: (() => void) | null;
-
   startPipeline: (repos: string[]) => void;
   stopPipeline: () => void;
   clearHistory: () => void;
@@ -30,6 +26,10 @@ interface PipelineStore {
   fetchFixHistory: () => Promise<void>;
 }
 
+// Private references that don't trigger re-renders
+let wsInstance: WebSocket | null = null;
+let wsCleanupFunc: (() => void) | null = null;
+
 export const usePipelineStore = create<PipelineStore>((set, get) => ({
   executions: [],
   activeExecution: null,
@@ -42,28 +42,23 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   hookStats: null,
   fixHistory: [],
 
-  _ws: null,
-  _wsCleanup: null,
-
   connectWebSocket: () => {
-    const { _wsCleanup, _ws } = get();
-    if (_wsCleanup) _wsCleanup();
+    if (wsCleanupFunc) wsCleanupFunc();
     if (typeof window === "undefined") return () => {};
 
     const url = get().wsUrl;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      const currentWs = get()._ws;
-      if (currentWs) {
-        currentWs.onclose = null;
-        currentWs.onerror = null;
-        currentWs.onmessage = null;
-        currentWs.close();
+      if (wsInstance) {
+        wsInstance.onclose = null;
+        wsInstance.onerror = null;
+        wsInstance.onmessage = null;
+        wsInstance.close();
       }
 
       const ws = new WebSocket(url);
-      set({ _ws: ws });
+      wsInstance = ws;
 
       ws.onopen = () => {
         set({ wsConnected: true, wsReconnectAttempts: 0 });
@@ -90,7 +85,8 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       };
 
       ws.onclose = () => {
-        set({ wsConnected: false, _ws: null });
+        set({ wsConnected: false });
+        wsInstance = null;
         reconnectTimer = setTimeout(() => {
           set((s) => ({ wsReconnectAttempts: s.wsReconnectAttempts + 1 }));
           connect();
@@ -106,18 +102,18 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
 
     const cleanup = () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      const ws = get()._ws;
-      if (ws) {
-        ws.onclose = null;
-        ws.onerror = null;
-        ws.onmessage = null;
-        ws.close();
-        set({ _ws: null });
+      if (wsInstance) {
+        wsInstance.onclose = null;
+        wsInstance.onerror = null;
+        wsInstance.onmessage = null;
+        wsInstance.close();
+        wsInstance = null;
       }
-      set({ wsConnected: false, _wsCleanup: null });
+      set({ wsConnected: false });
+      wsCleanupFunc = null;
     };
 
-    set({ _wsCleanup: cleanup });
+    wsCleanupFunc = cleanup;
     return cleanup;
   },
 

@@ -18,3 +18,23 @@ export interface CLIStateData {
   lastCommand?: string;
   output: string[];
 }
+
+export interface AgentAssessment {
+  name: string;
+  path: string;
+  type: string;
+  quality: { 
+    lintScore: number; 
+    typeSafety: number; 
+    structureScore: number; 
+    overall: string 
+  };
+  skills: string[];
+  integrationPotential: { 
+    pipelinePhase: string; 
+    score: number; 
+    reason: string 
+  }[];
+  recommendedAssignment: string;
+  confidence: number;
+}

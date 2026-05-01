@@ -4,18 +4,8 @@ import { SectionHeader } from '../components/SectionHeader';
 import { ActivePipelineRun } from '../features/pipeline/ActivePipelineRun';
 import { PipelineVisualizer } from '../features/pipeline/PipelineVisualizer';
 import { usePipelineStore } from '../stores/usePipelineStore';
-import type { PipelineExecutionData, BuildStepData, CustomAgentData, RepoTrend } from '../types';
-
-interface AgentAssessment {
-  name: string;
-  path: string;
-  type: string;
-  quality: { lintScore: number; typeSafety: number; structureScore: number; overall: string };
-  skills: string[];
-  integrationPotential: { pipelinePhase: string; score: number; reason: string }[];
-  recommendedAssignment: string;
-  confidence: number;
-}
+import { useWorkspaceStore } from '../stores/useWorkspaceStore';
+import type { PipelineExecutionData, BuildStepData, CustomAgentData, RepoTrend, AgentAssessment } from '../types';
 
 interface PipelineTabProps {
   activeRun: PipelineExecutionData | null;
@@ -43,7 +33,9 @@ export const PipelineTab = ({
   const [ingesting, setIngesting] = useState(false);
   const [ingestedRepos, setIngestedRepos] = useState<Array<{ owner: string; repo: string; addedAt: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const startPipelineStore = usePipelineStore((s) => s.startPipeline);
+  const addNotification = useWorkspaceStore((s) => s.addNotification);
 
   const handleIngestRepo = async (urlOverride?: string) => {
     const targetUrl = urlOverride || repoUrl;
@@ -83,8 +75,11 @@ export const PipelineTab = ({
       setIngestedRepos(prev => [...prev, { owner, repo, addedAt: new Date().toISOString() }]);
     } catch (e: any) {
       console.error('Ingest failed:', e.message);
-      // Notify user instead of silent fallback
-      alert(`Ingest Failed: ${e.message}`);
+      addNotification({
+        type: 'error',
+        title: 'Repository Ingest Failed',
+        message: e.message
+      });
       setRepoUrl('');
     }
     setIngesting(false);
