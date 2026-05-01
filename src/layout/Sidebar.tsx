@@ -1,9 +1,9 @@
 import { useState, type ElementType } from 'react';
-import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow } from 'lucide-react';
+import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SystemManifest } from './SystemManifest';
 
-export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History';
+export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit';
 
 const PRIMARY_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Sparkles, label: 'Composer' },
@@ -14,6 +14,7 @@ const ADVANCED_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Activity, label: 'Pipeline' },
   { icon: Zap, label: 'Activity' },
   { icon: History, label: 'History' },
+  { icon: Shield, label: 'Audit' },
   { icon: Terminal, label: 'Command Center' },
   { icon: Settings, label: 'Settings' },
 ];

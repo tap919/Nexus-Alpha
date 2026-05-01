@@ -421,6 +421,36 @@ async function runFinalizingPhase(ctx: PhaseContext): Promise<void> {
       execution.logs.push(`[PR] Failed to generate PR: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // Phase 3: Living Institutional Memory
+  // Write the run synthesis back to the wiki for future agents to consume
+  try {
+    const learnings = [
+      `# Institutional Memory: Pipeline Run ${execution.id}`,
+      `**Repository:** ${sourceRepos.join(', ')}`,
+      `**Date:** ${new Date().toISOString()}`,
+      `**Status:** ${execution.status}`,
+      '',
+      '## Key Observations',
+      ...execution.logs.filter(l => l.includes('[LEARNING]') || l.includes('[BRAIN]')).map(l => `- ${l}`),
+      '',
+      '## Automated Fixes & Changes',
+      ...execution.logs.filter(l => l.includes('[PR]') || l.includes('[FIX]')).map(l => `- ${l}`),
+      '',
+      '## Performance Metrics',
+      `- Progress: ${execution.progress}%`,
+      `- Final Step: ${execution.currentStep}`,
+    ].join('\n');
+
+    const learningFile = ingestRaw(`learning-${execution.id}`, learnings, { 
+      pipelineId: execution.id, 
+      type: 'institutional-memory',
+      tags: ['history', 'synthesis', ...sourceRepos]
+    });
+    execution.logs.push(`[MEMORY] Synthesis saved to wiki: raw/${learningFile}`);
+  } catch (err) {
+    console.warn('[MEMORY] Failed to save synthesis to wiki:', err);
+  }
 }
 
 async function probeIntegrations(): Promise<{ name: string; status: string; latency: number }[]> {

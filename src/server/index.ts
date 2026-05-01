@@ -40,6 +40,7 @@ import { cloneRepo } from "../services/repoLoaderService";
 import { assessAgentFolder } from "../services/agentAssessmentService";
 import { runBuildCommand, runAuditCommand } from "./realTools";
 import { initLogService, getExecutionLog } from "./logService";
+import { initAuditService, getAuditLogs } from "./auditLogService";
 import { listPullRequests, updateHunkStatus } from "../services/prAgentService";
 
 const app = express();
@@ -1742,6 +1743,16 @@ app.post("/api/pipeline/prs/:id/hunks/:hunkId", async (req, res) => {
   }
 });
 
+/** GET /api/audit/logs — Fetch system audit logs */
+app.get("/api/audit/logs", async (_req, res) => {
+  try {
+    const logs = await getAuditLogs();
+    res.json(logs);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch audit logs" });
+  }
+});
+
 // ─── Start ─────────────────────────────────────────────────────────────────────────
 (async () => {
   const queueReady = await initPipelineQueue();
@@ -1749,6 +1760,9 @@ app.post("/api/pipeline/prs/:id/hunks/:hunkId", async (req, res) => {
 
   await initLogService();
   console.log('[L] Log persistence service initialized');
+
+  await initAuditService();
+  console.log('[A] System audit service initialized');
 
   await startLocalInfra();
   const infra = getLocalInfraStatus();

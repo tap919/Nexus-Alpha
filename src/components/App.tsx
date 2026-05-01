@@ -22,6 +22,7 @@ const PipelineTab = lazy(() => import('../views/PipelineTab').then(m => ({ defau
 const SettingsTab = lazy(() => import('../views/SettingsTab').then(m => ({ default: m.SettingsTab })));
 const ActivityTab = lazy(() => import('../views/ActivityTab').then(m => ({ default: m.ActivityTab })));
 const HistoryTab = lazy(() => import('../views/HistoryTab').then(m => ({ default: m.HistoryTab })));
+const AuditTab = lazy(() => import('../views/AuditTab').then(m => ({ default: m.AuditTab })));
 
 export default function App() {
   const {
@@ -74,6 +75,7 @@ export default function App() {
               {activeTab === 'Pipeline' && <PipelineTab />}
               {activeTab === 'Activity' && <ActivityTab />}
               {activeTab === 'History' && <HistoryTab />}
+              {activeTab === 'Audit' && <AuditTab />}
               {activeTab === 'Settings' && <SettingsTab />}
             </Suspense>
           </div>

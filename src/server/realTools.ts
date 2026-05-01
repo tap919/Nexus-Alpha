@@ -7,6 +7,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 
 import { permissionService } from '../services/permissionService';
+import { logAuditEvent } from './auditLogService';
 
 export interface ShellResult {
   stdout: string;
@@ -30,17 +31,37 @@ export async function runShellCommand(
   });
 
   if (perm.action === 'deny') {
+    await logAuditEvent({
+      actor: 'Nexus Agent',
+      action: 'EXECUTE_SHELL_DENIED',
+      target: command,
+      metadata: { perm, cwd },
+      status: 'failure'
+    });
     throw new Error(`Permission Denied: Execution of "${command}" is restricted by policy.`);
   }
   
   if (perm.action === 'ask') {
     console.warn(`[SECURITY] Command requires manual approval: ${command}`);
-    // In a real system, this would wait for an approval signal from the UI
-    // For this implementation, we log it and allow it if in 'dev' mode, otherwise throw.
     if (process.env.NODE_ENV !== 'development' && !process.env.AUTO_APPROVE) {
+      await logAuditEvent({
+        actor: 'Nexus Agent',
+        action: 'EXECUTE_SHELL_BLOCKED_FOR_APPROVAL',
+        target: command,
+        metadata: { perm, cwd },
+        status: 'warning'
+      });
       throw new Error(`Permission Required: Approval needed for "${command}".`);
     }
   }
+
+  await logAuditEvent({
+    actor: 'Nexus Agent',
+    action: 'EXECUTE_SHELL_START',
+    target: command,
+    metadata: { perm, cwd },
+    status: 'success'
+  });
 
   const options: any = { cwd: cwd ?? process.cwd(), timeout: timeoutMs };
   
