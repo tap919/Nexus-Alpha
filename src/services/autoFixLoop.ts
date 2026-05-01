@@ -18,6 +18,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { logger } from "../lib/logger";
 import { analyzeError, generateFixCode } from "./errorAnalyzer";
+import { vitalsService } from "./vitalsService";
 import type { FixAttempt, AutoFixContext } from "../types/hooks";
 
 const DATA_DIR = path.resolve(process.cwd(), "uploads", "nexus");
@@ -285,12 +286,23 @@ export async function runAutoFixLoop(
       ? `\n\nPrevious fix attempts:\n${attempts.map(a => `- ${a.fixDescription} → ${a.success ? "FIXED" : "FAILED"}`).join("\n")}`
       : "";
 
+    // Step 0: Check for visual regressions if build succeeded
+    let visualContext = "";
+    if (context.phase === 'build' && !context.error) {
+      try {
+        const report = await vitalsService.getAppReport(context.executionId);
+        if (report.vitals.score < 90) {
+          visualContext = `\n[VISUAL WARNING] Performance score is low (${report.vitals.score}). Recommendations: ${report.recommendations.join(', ')}`;
+        }
+      } catch { /* ignore */ }
+    }
+
     const diagnosis = await analyzeError(
-      context.error.message,
-      context.error.stack,
+      context.error?.message || "Visual validation requested",
+      context.error?.stack || "",
       context.phase,
       context.sourceRepos,
-      (context.codebaseContext || "") + enrichedContext
+      (context.codebaseContext || "") + enrichedContext + visualContext
     );
 
     // Step 2: Generate fix code if applicable

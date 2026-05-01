@@ -35,6 +35,8 @@ import { listTemplates, getTemplateForDescription } from '../core/agents/templat
 import CodingAgentService from '../services/codingAgentService';
 import { settingsService, type PrivacyMode } from './settingsService';
 import { plannerAgent } from '../core/agents/plannerAgent';
+import { queryGraph, getGraphSummary } from '../services/graphifyService';
+import { vitalsService } from '../services/vitalsService';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -509,6 +511,47 @@ app.post('/api/coding/plan/apply', requireRole(['admin', 'user']), strictLimiter
   }).catch(() => {});
 
   return c.json({ success: true, message: 'Plan application initiated' });
+});
+
+// ─── Intelligence & RAG API ──────────────────────────────────────────────────
+app.post('/api/coding/search', requireRole(['admin', 'user']), async (c) => {
+  const body = await readJson<{ query: string }>(c);
+  if (!body?.query) return c.json({ error: 'query required' }, 400);
+
+  const results = queryGraph(body.query);
+  return c.json({
+    results,
+    summary: getGraphSummary(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ─── Performance API ─────────────────────────────────────────────────────────
+app.get('/api/performance/profile/:appId', requireRole(['admin', 'user']), async (c) => {
+  const appId = c.req.param('appId');
+  try {
+    const report = await vitalsService.getAppReport(appId);
+    return c.json(report);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// ─── Audit & Enterprise API ──────────────────────────────────────────────────
+app.get('/api/audit/logs', requireRole(['admin']), async (c) => {
+  const logs = await getAuditLogs();
+  return c.json(logs);
+});
+
+app.get('/api/audit/stats', requireRole(['admin']), async (c) => {
+  const logs = await getAuditLogs();
+  const stats = {
+    totalEvents: logs.length,
+    byAction: logs.reduce((acc, l) => ({ ...acc, [l.action]: (acc[l.action] || 0) + 1 }), {} as Record<string, number>),
+    failures: logs.filter(l => l.status === 'failure').length,
+    last24h: logs.filter(l => new Date(l.timestamp).getTime() > Date.now() - 86400000).length
+  };
+  return c.json(stats);
 });
 
 // ─── Settings API ────────────────────────────────────────────────────────────
