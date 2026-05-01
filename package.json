@@ -14,7 +14,7 @@
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "tsc --project electron/tsconfig.json && npm run build && electron-builder",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
+    "lint": "biome check . && tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "test:e2e": "playwright test",
