@@ -7,10 +7,9 @@ import { spawn, execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
-import { chromium, Browser, Page } from "@playwright/test";
-
 import { chromium, Browser, BrowserContext, Page } from "@playwright/test";
 import crypto from "crypto";
+import { logAuditEvent } from "./auditLogService";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -140,7 +139,15 @@ export async function runBrowserHarness(options: BrowserCommandOptions): Promise
         if (urlMatch) {
           const targetUrl = urlMatch[1];
           if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            throw new Error(`Security Violation: Unsafe protocol in URL ${targetUrl}`);
+            const violation = `Security Violation: Unsafe protocol in URL ${targetUrl}`;
+            await logAuditEvent({
+              actor: 'agent:browser',
+              action: 'protocol_violation',
+              target: targetUrl,
+              status: 'failure',
+              metadata: { command: stmt }
+            }).catch(() => {});
+            throw new Error(violation);
           }
           await page.goto(targetUrl);
           output += `[navigated to ${targetUrl}]\n`;
@@ -172,7 +179,15 @@ export async function runBrowserHarness(options: BrowserCommandOptions): Promise
       }
       else {
         // 3. Command Safety Guard (Fails explicitly instead of executing arbitrary JS)
-        throw new Error(`Security Violation: Unrecognized or malformed DSL command: "${stmt}"`);
+        const violation = `Security Violation: Unrecognized or malformed DSL command: "${stmt}"`;
+        await logAuditEvent({
+          actor: 'agent:browser',
+          action: 'command_violation',
+          target: 'browser-harness',
+          status: 'failure',
+          metadata: { command: stmt, fullRequest: cmd }
+        }).catch(() => {});
+        throw new Error(violation);
       }
     }
 

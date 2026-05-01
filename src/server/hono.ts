@@ -117,6 +117,16 @@ const defaultLimiter = rateLimiter({
   limit: 100,
   keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
   message: 'Too many requests, please try again later.',
+  handler: async (c, next) => {
+    await logAuditEvent({
+      actor: (c as any).get('user')?.sub || 'anonymous',
+      action: 'rate_limit_exceeded',
+      target: c.req.path,
+      status: 'warning',
+      metadata: { limit: 100 }
+    }).catch(() => {});
+    return c.json({ error: 'Too many requests' }, 429);
+  }
 });
 
 const strictLimiter = rateLimiter({
@@ -124,6 +134,16 @@ const strictLimiter = rateLimiter({
   limit: 15,
   keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
   message: 'Quota exceeded for high-cost endpoint.',
+  handler: async (c, next) => {
+    await logAuditEvent({
+      actor: (c as any).get('user')?.sub || 'anonymous',
+      action: 'quota_exceeded',
+      target: c.req.path,
+      status: 'warning',
+      metadata: { limit: 15 }
+    }).catch(() => {});
+    return c.json({ error: 'Quota exceeded' }, 429);
+  }
 });
 
 app.use('/api/*', defaultLimiter);
@@ -168,13 +188,14 @@ app.get('/health', async (c) => {
 });
 
 app.post('/api/pipeline/run', requireRole(['admin', 'system']), strictLimiter, async (c) => {
+  const user = c.get('user');
   const body = await readJson<{ repos?: string[]; agentId?: string }>(c);
   const repos = body?.repos;
   if (!Array.isArray(repos) || repos.length === 0) {
     return c.json({ error: 'repos array required' }, 400);
   }
 
-  const result = await enqueuePipeline(repos, body?.agentId);
+  const result = await enqueuePipeline(repos, user.sub, body?.agentId);
 
   if (!result.simulated) {
     return c.json({ started: true, executionId: result.id, mode: 'queue' });
@@ -189,7 +210,16 @@ app.post('/api/pipeline/run', requireRole(['admin', 'system']), strictLimiter, a
   return c.json({ started: true, executionId: result.id, mode: 'simulated' });
 });
 
-app.get('/api/pipeline/status', (c) => c.json({ wsClients: clients.size, ts: Date.now() }));
+app.get('/api/pipeline/status/:id', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const jobId = c.req.param('id');
+  try {
+    const status = await getJobStatus(jobId, user.sub);
+    return c.json(status);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Unknown error' }, error instanceof Error && error.message.includes('Forbidden') ? 403 : 404);
+  }
+});
 
 app.get('/api/integrations/status', async (c) => {
   try {

@@ -7,6 +7,7 @@ import { trackPipelineRun } from '../services/gamificationService';
 
 export interface PipelineJob {
   repos: string[];
+  userId: string;
   agentId?: string;
 }
 
@@ -55,8 +56,9 @@ export async function initPipelineQueue(): Promise<boolean> {
     worker = new Worker<PipelineJob, PipelineExecution>(
       'nexus-pipeline',
       async (job: Job<PipelineJob>) => {
-        const exec: PipelineExecution = {
+        const exec: PipelineExecution & { userId: string } = {
           id: job.id ?? `pipeline-${Date.now()}`,
+          userId: job.data.userId,
           sourceRepos: job.data.repos,
           currentStep: 'Starting...',
           progress: 0,
@@ -310,16 +312,36 @@ export async function initPipelineQueue(): Promise<boolean> {
   }
 }
 
-export async function enqueuePipeline(repos: string[], agentId?: string): Promise<{ id: string; simulated: boolean }> {
+export async function enqueuePipeline(repos: string[], userId: string, agentId?: string): Promise<{ id: string; simulated: boolean }> {
   if (queue) {
     try {
-      const job = await queue.add('pipeline-run', { repos, agentId });
+      const job = await queue.add('pipeline-run', { repos, userId, agentId });
       return { id: job.id ?? '', simulated: false };
     } catch {
       return { id: `simulated-${Date.now()}`, simulated: true };
     }
   }
   return { id: `simulated-${Date.now()}`, simulated: true };
+}
+
+export async function getJobStatus(jobId: string, userId: string): Promise<any> {
+  if (!queue) throw new Error('Queue not initialized');
+  const job = await queue.getJob(jobId);
+  if (!job) throw new Error('Job not found');
+  
+  // OWASP: Object-level ownership check
+  if (job.data.userId !== userId) {
+    await logAuditEvent({
+      actor: userId,
+      action: 'access_denied_object',
+      target: `pipeline:${jobId}`,
+      status: 'failure',
+      metadata: { owner: job.data.userId }
+    }).catch(() => {});
+    throw new Error('Forbidden: You do not own this pipeline execution');
+  }
+
+  return job.returnvalue || { status: 'running', progress: await job.progress() };
 }
 
 export async function shutdownPipelineQueue(): Promise<void> {
