@@ -1,21 +1,21 @@
 # Nexus Alpha
 
-**Nexus Alpha** is an AI-powered developer intelligence dashboard and autonomous orchestration engine built with React, TypeScript, and Vite. It aggregates real-time signals from the open-source ecosystem, manages pipeline executions, and employs the powerful **Cheetah V3** autocoder engine for secure, deterministic full-stack code generation.
+**Nexus Alpha** is an AI-native developer IDE and autonomous orchestration engine built directly in the browser. Powered by React, TypeScript, and Vite, it integrates full-stack generative capabilities with durable workflows, real-time collaborative editing, an embedded terminal, and a sophisticated vector database integration. With Google Gemini as its core reasoning engine, it transitions from a simple dashboard into a comprehensive, multi-modal development environment.
 
 ***
 
-## Features
+## Core Features
 
+- **AI-Native IDE Experience** — Includes a Monaco-based browser editor (`@monaco-editor/react`), real-time collaborative editing via Yjs (CRDTs), and an embedded full terminal (`xterm.js`).
 - **Cheetah V3 Autocoder** — State-of-the-art Python-based code generation engine bridged with a TypeScript-native fallback for autonomous architectural expansion and multi-file synthesis.
+- **Durable Workflows** — Powered by Temporal.io (`@temporalio/client`, `worker`, `workflow`) for resilient, long-running asynchronous orchestration.
+- **Job Queues & Resiliency** — Utilizes BullMQ (Redis-backed) for pipeline execution and Opossum for robust circuit-breaker patterns across external API calls.
+- **Advanced LLM Orchestration** — Integrates LangChain, LangChain Community, and LangChain OpenAI for complex, multi-agent reasoning chains.
+- **Local Embedded RAG** — Leverages Qdrant as a vector database and Xenova Transformers for in-browser local embeddings, ensuring highly relevant generation context.
 - **Hono Backend Platform** — High-performance backend routing built on Hono, featuring strict rate-limiting, JWT/API Key dual-authentication, and robust proxy safeguards.
-- **AI Intelligence Dashboard** — Live feed of AI ecosystem growth metrics, developer activity, model counts, and sentiment scoring powered by Gemini.
-- **Build Pipeline Orchestrator** — Multi-step pipeline execution with E2E test integration via Playwright and real-time progress tracking.
+- **Multi-Provider CLI** — Switch between OpenCode, OpenRouter, and DeepSeek providers seamlessly from within the app.
 - **Self-Healing Loop** — Autonomous auto-fix loops with strict security gating (`NEXUS_ALLOW_AUTO_FIX`), granular RCE command allowlists, and atomic fix-history management.
-- **Trending Repo Analysis** — Fetches and analyzes trending GitHub repositories with AI-generated stack summaries, utility scores, and build type classification.
-- **MCP Server Integration** — Built-in Model Context Protocol server (`src/server/mcp.ts`) for agent-to-agent tool calling.
-- **Browser Automation Module** — Tracks navigation history, DOM snapshots, and element observations for agentic browser tasks (with secure sandboxing).
-- **RAG Context** — Indexed document retrieval attached to pipeline runs for grounded AI responses.
-- **Real-Time WebSocket Feed** — Live signal stream for market/ecosystem signals and synergy insights.
+- **Desktop Ready** — Pre-configured Electron build target for native desktop deployment.
 
 ***
 
@@ -24,15 +24,17 @@
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, TypeScript, Tailwind CSS v4, Vite 6 |
-| Animations | Motion (Framer Motion successor) |
-| State | Zustand |
-| Routing | React Router v6 |
-| Backend | **Hono**, WebSocket (`ws`) |
+| Editor & Terminal | Monaco Editor, Yjs (CRDTs), xterm.js |
+| State & UI | Zustand, Motion, Recharts, Lucide React |
+| Backend Core | **Hono**, Express (Legacy Adapter), WebSocket (`ws`) |
+| Workflows & Queues | Temporal.io, BullMQ |
 | Autocoder | **Overlay Cheetah V3** (Python/Jinja2 + TS Fallback) |
-| AI | Google Gemini (`@google/genai`) |
-| MCP | `@modelcontextprotocol/sdk` |
+| AI / LLMs | Google Gemini (`@google/genai`), LangChain, Transformers.js |
+| Vector DB (RAG) | Qdrant (`@qdrant/js-client-rest`) |
+| Resiliency & Ops | Opossum (Circuit Breaker), Pino (Logging) |
+| Code Quality | Biome (Linter/Formatter) |
 | Database/Auth | Supabase |
-| Testing | Playwright |
+| Testing / Desktop | Playwright / Electron |
 
 ***
 
@@ -41,6 +43,8 @@
 - **Node.js** v18 or higher
 - **npm** v9 or higher
 - A **Google Gemini API key** (required) — get one at [ai.google.dev](https://ai.google.dev)
+- Redis server (required for BullMQ)
+- Temporal local server (optional, required for durable workflows)
 - Python 3.9+ (optional, required only for native Cheetah V3 generation)
 
 ***
@@ -113,8 +117,8 @@ npm run mcp
 |---|---|
 | `npm run dev` | Start Vite dev server on port 3000 |
 | `npm run build` | Build production bundle to `/dist` |
-| `npm run preview` | Preview production build locally |
-| `npm run lint` | TypeScript type check (no emit) |
+| `npm run electron:dev`| Run the app natively in Electron |
+| `npm run lint` | TypeScript type check (no emit) and Biome analysis |
 | `npm run server` | Start Hono + WebSocket backend |
 | `npm run mcp` | Start MCP server |
 | `npm run test:e2e` | Run Playwright end-to-end tests |
@@ -125,21 +129,18 @@ npm run mcp
 
 ```
 Nexus-Alpha/
+├── docs/                 # Planning docs, checklists, and architecture rules
 ├── src/
 │   ├── components/       # UI elements and tab views (src/components/views)
-│   ├── features/         # Feature-specific components
+│   ├── features/         # Feature modules (vibecoder, composer, terminal, etc.)
 │   ├── hooks/            # Custom React hooks
-│   ├── lib/              # Utility functions and helpers
-│   ├── services/         # API clients and orchestration (Cheetah, AutoFix)
+│   ├── services/         # API clients, CRDT syncing, orchestration (Cheetah)
 │   ├── stores/           # Zustand state stores
-│   ├── types/            # Shared TypeScript interfaces
-│   └── server/
-│       ├── hono.ts       # Main Hono backend and WebSocket server
-│       ├── legacyRoutes.ts # Migrated Express endpoints
-│       └── mcp.ts        # MCP server implementation
+│   ├── server/           # Backend (Hono, MCP, Queues)
+│   └── lib/              # Utility functions
 ├── cheetah/              # Overlay Cheetah V3 engine tasks and templates
+├── electron/             # Electron desktop bindings
 ├── tests/                # Playwright e2e tests
-├── ARCHITECTURE.md       # Canonical directory ownership rules
 ├── vite.config.ts        # Vite configuration
 └── package.json          # Dependency management
 ```
