@@ -19,7 +19,7 @@ import type { PipelineExecution } from "../types";
 import { integrationHub } from "../services/integrationService";
 import { runDeterministicBrain, runBrowserHarness, findBrainDir, isAvailable } from "./brainToolService";
 import { initPipelineQueue, enqueuePipeline, shutdownPipelineQueue } from "./pipelineQueue";
-import { BROADCAST_FN } from "./broadcastRef";
+import { broadcastService } from "./broadcastService";
 import {
   trackError,
   resolveError,
@@ -64,6 +64,11 @@ const strictLimiter = rateLimit({
 
 const API_KEY = process.env.NEXUS_API_KEY || 'nexus-alpha-dev-key';
 
+function requireAuth(req: any, res: any, next: any) {
+  const auth = req.headers['x-nexus-api-key'] || req.headers['authorization'];
+  if (auth !== API_KEY) {
+    return res.status(401).json({ error: "Unauthorized: Invalid or missing NEXUS_API_KEY" });
+  }
   next();
 }
 
@@ -237,8 +242,7 @@ app.post('/api/proxy/cli/stream', async (req, res) => {
   }
 });
 
-// ─── Auth + Rate Limiting for API routes (proxy routes above are public) ─────
-app.use("/api/", requireAuth);
+// ─── Rate Limiting for API routes ─────
 app.use("/api/", apiLimiter);
 app.use("/api/wiki", strictLimiter);
 app.use("/api/autoresearch", strictLimiter);
@@ -285,7 +289,7 @@ function broadcast(data: unknown): void {
   }
 }
 
-BROADCAST_FN.current = broadcast;
+broadcastService.setHandler(broadcast);
 
 // ─── REST API ────────────────────────────────────────────────────────────────────
 

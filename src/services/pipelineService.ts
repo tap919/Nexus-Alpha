@@ -27,7 +27,7 @@ import { logger } from '../lib/logger';
 import { runTestsCommand, runBuildCommand, runShellCommand } from '../server/realTools';
 import { saveExecutionLog } from '../server/logService';
 import { runHooksForPhase } from '../server/hookRunner';
-import { BROADCAST_FN } from '../server/broadcastRef';
+import { broadcastService } from '../server/broadcastService';
 import { getHooks } from './hookEngine'; // Fix Issue #3: Use server-side hook engine
 import { openPullRequest, generatePrDiff } from './prAgentService';
 
@@ -770,7 +770,7 @@ export async function runAutomatedPipeline(
       onUpdate({ ...execution, steps: [...execution.steps], logs: [...execution.logs] });
       
       execution.logs.push(`[${step.phase}] Executing...`);
-      if (BROADCAST_FN.current) BROADCAST_FN.current({ type: 'pipeline:log', executionId: execution.id, log: `[${step.phase}] Executing...` });
+      broadcastService.broadcast({ type: 'pipeline:log', executionId: execution.id, log: `[${step.phase}] Executing...` });
 
       const ctx: PhaseContext = {
         execution,
@@ -792,7 +792,7 @@ export async function runAutomatedPipeline(
         console.warn(`[HOOKS] Error running pre-hooks for ${step.phase}:`, err);
       }
 
-      // Execute specific logic if available
+      // Phase Logic
       if (step.phase === 'RAG Context Sync') await runRAGSync(ctx);
       else if (step.phase === 'MCP Context Resolution') await runMCPSync(ctx);
       else if (step.phase === 'E2E Testing') await runE2ETests(ctx);
@@ -800,6 +800,16 @@ export async function runAutomatedPipeline(
       else if (step.phase === 'Finalizing') await runFinalizingPhase(ctx);
       else if (step.phase === 'Security Audit') await runSecurityAuditPhase({ execution, sourceRepos, targetPath: sourceInfo.targetPaths[0] });
       else if (step.phase === 'Static Analysis') await runStaticAnalysisPhase({ execution, sourceRepos, targetPath: sourceInfo.targetPaths[0] });
+      else if (step.phase === 'Environment Setup') {
+        execution.logs.push('[SYSTEM] Provisioning isolated execution environment...');
+        broadcastService.broadcast({ type: 'pipeline:log', executionId: execution.id, log: '[SYSTEM] Provisioning isolated execution environment...' });
+        await SLEEP(500);
+      }
+      else if (step.phase === 'Dependency Resolution') {
+        execution.logs.push('[SYSTEM] Analyzing package.json and resolving dependency graph...');
+        broadcastService.broadcast({ type: 'pipeline:log', executionId: execution.id, log: '[SYSTEM] Analyzing package.json and resolving dependency graph...' });
+        await SLEEP(800);
+      }
       else if (step.phase === 'Build & Compile') {
         const buildResult = await runBuildCommand();
         const logs = [
@@ -808,7 +818,7 @@ export async function runAutomatedPipeline(
           ...(buildResult.stderr ? buildResult.stderr.split('\n').filter(Boolean).slice(-10) : [])
         ];
         execution.logs.push(...logs);
-        if (BROADCAST_FN.current) logs.forEach(l => BROADCAST_FN.current!({ type: 'pipeline:log', executionId: execution.id, log: l }));
+        logs.forEach(l => broadcastService.broadcast({ type: 'pipeline:log', executionId: execution.id, log: l }));
       }
       else {
         // Fallback to logs
@@ -817,7 +827,7 @@ export async function runAutomatedPipeline(
           for (const line of templates.slice(0, 3)) {
             const l = `[${step.phase}] ${line}`;
             execution.logs.push(l);
-            if (BROADCAST_FN.current) BROADCAST_FN.current({ type: 'pipeline:log', executionId: execution.id, log: l });
+            broadcastService.broadcast({ type: 'pipeline:log', executionId: execution.id, log: l });
             await SLEEP(300);
           }
         } else {

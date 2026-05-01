@@ -1,6 +1,6 @@
 import { Queue, Worker, QueueEvents, type Job } from 'bullmq';
 import type { PipelineExecution } from '../types';
-import { BROADCAST_FN } from './broadcastRef';
+import { broadcastService } from './broadcastService';
 import { createConnection } from 'net';
 import { trackError } from '../services/errorTrackingService';
 import { trackPipelineRun } from '../services/gamificationService';
@@ -68,10 +68,7 @@ export async function initPipelineQueue(): Promise<boolean> {
 
         const update = (partial: Partial<PipelineExecution>) => {
           Object.assign(exec, partial);
-          const broadcast = BROADCAST_FN.current;
-          if (broadcast) {
-            broadcast({ type: 'pipeline:update', execution: exec });
-          }
+          broadcastService.broadcast({ type: 'pipeline:update', execution: exec });
           job.updateProgress(exec.progress);
         };
 
@@ -275,18 +272,16 @@ export async function initPipelineQueue(): Promise<boolean> {
 
     worker.on('completed', (job) => {
       const exec = job.returnvalue;
-      const broadcast = BROADCAST_FN.current;
-      if (broadcast && exec) {
-        broadcast({ type: 'pipeline:update', execution: exec });
+      if (exec) {
+        broadcastService.broadcast({ type: 'pipeline:update', execution: exec });
       }
       const repos = (job.data as PipelineJob).repos ?? [];
       trackPipelineRun(true, repos.length);
     });
 
     worker.on('failed', (job, err) => {
-      const broadcast = BROADCAST_FN.current;
-      if (broadcast && job) {
-        broadcast({
+      if (job) {
+        broadcastService.broadcast({
           type: 'pipeline:update',
           execution: {
             id: job.id ?? 'unknown',
