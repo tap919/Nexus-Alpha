@@ -22,6 +22,7 @@ import {
   type CheetahPattern,
 } from '../services/cheetahService';
 import { broadcastService } from './broadcastService';
+import { legacyRoutes } from './legacyRoutes';
 
 const app = new Hono();
 
@@ -370,6 +371,9 @@ app.post('/api/proxy/cli/stream', rateLimit(20), async (c) => {
     return c.json({ error: e instanceof Error ? e.message : 'Stream error' }, 503);
   }
 });
+
+// ─── Mount Legacy Routes ─────────────────────────────────────────────────────
+app.route('/', legacyRoutes);
 
 // ─── Globals for cleanup ─────────────────────────────────────────────────────
 let wsServer: WebSocketServer | null = null;

@@ -20,7 +20,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "ci": "npm run typecheck && npm run build && npm run test:e2e",
-    "server": "tsx src/server/index.ts",
+    "server": "tsx src/server/hono.ts",
     "mcp": "tsx src/server/mcp.ts",
     "infra": "tsx src/services/local-infra.ts"
   },
