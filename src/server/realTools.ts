@@ -6,6 +6,8 @@ import { exec } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
 
+import { permissionService } from '../services/permissionService';
+
 export interface ShellResult {
   stdout: string;
   stderr: string;
@@ -16,16 +18,42 @@ export interface ShellResult {
 export async function runShellCommand(
   command: string,
   cwd?: string,
-  timeoutMs: number = 60000
+  timeoutMs: number = 60000,
+  onData?: (data: string) => void
 ): Promise<ShellResult> {
+  // Permission Check
+  const perm = permissionService.checkPermission({
+    requestedScope: 'bash',
+    requestedAction: 'execute',
+    command,
+    timestamp: new Date().toISOString()
+  });
+
+  if (perm.action === 'deny') {
+    throw new Error(`Permission Denied: Execution of "${command}" is restricted by policy.`);
+  }
+  
+  if (perm.action === 'ask') {
+    console.warn(`[SECURITY] Command requires manual approval: ${command}`);
+    // In a real system, this would wait for an approval signal from the UI
+    // For this implementation, we log it and allow it if in 'dev' mode, otherwise throw.
+    if (process.env.NODE_ENV !== 'development' && !process.env.AUTO_APPROVE) {
+      throw new Error(`Permission Required: Approval needed for "${command}".`);
+    }
+  }
+
   const options: any = { cwd: cwd ?? process.cwd(), timeout: timeoutMs };
-  // Use exec to get stdout/stderr and exit code
+  
   return new Promise<ShellResult>((resolve) => {
     const child = exec(command, options, (error: any, stdout: string, stderr: string) => {
       const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
       resolve({ stdout, stderr, code });
     });
-    // Optional: pipe child.stdout/err if future streaming is needed
+
+    if (onData) {
+      child.stdout?.on('data', (data) => onData(data.toString()));
+      child.stderr?.on('data', (data) => onData(data.toString()));
+    }
   });
 }
 

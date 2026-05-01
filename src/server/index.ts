@@ -39,6 +39,8 @@ import { fetchGitHubTrending, fetchAIVideos } from "../services/realTimeDataServ
 import { cloneRepo } from "../services/repoLoaderService";
 import { assessAgentFolder } from "../services/agentAssessmentService";
 import { runBuildCommand, runAuditCommand } from "./realTools";
+import { initLogService, getExecutionLog } from "./logService";
+import { listPullRequests, updateHunkStatus } from "../services/prAgentService";
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -1705,10 +1707,48 @@ app.post("/api/tools/debt", strictLimiter, async (req, res) => {
   }
 });
 
+/** GET /api/pipeline/logs/:id — Fetch persistent execution logs */
+app.get("/api/pipeline/logs/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const logData = await getExecutionLog(id);
+    if (!logData) return res.status(404).json({ error: "Logs not found" });
+    res.json(logData);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch logs" });
+  }
+});
+
+/** GET /api/pipeline/prs — List all automated PRs */
+app.get("/api/pipeline/prs", async (_req, res) => {
+  try {
+    const prs = await listPullRequests();
+    res.json(prs);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch PRs" });
+  }
+});
+
+/** POST /api/pipeline/prs/:id/hunks/:hunkId — Update hunk status */
+app.post("/api/pipeline/prs/:id/hunks/:hunkId", async (req, res) => {
+  try {
+    const { id, hunkId } = req.params;
+    const { status } = req.body as { status: 'approved' | 'rejected' };
+    const updatedPr = await updateHunkStatus(id, hunkId, status);
+    if (!updatedPr) return res.status(404).json({ error: "PR or hunk not found" });
+    res.json(updatedPr);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update hunk" });
+  }
+});
+
 // ─── Start ─────────────────────────────────────────────────────────────────────────
 (async () => {
   const queueReady = await initPipelineQueue();
   console.log(`[Q] BullMQ pipeline queue ${queueReady ? 'connected' : 'unavailable (simulated mode)'}`);
+
+  await initLogService();
+  console.log('[L] Log persistence service initialized');
 
   await startLocalInfra();
   const infra = getLocalInfraStatus();

@@ -12,6 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const POSSIBLE_BRAIN_PATHS = [
+  join(process.cwd(), "packages/deterministic-brain"),
+  join(__dirname, "../../packages/deterministic-brain"),
   join(__dirname, "../../deterministic-brain-main"),
   join(__dirname, "../deterministic-brain-main"),
   join(process.cwd(), "deterministic-brain-main"),

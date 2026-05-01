@@ -3,6 +3,7 @@ import { Activity, Search, PlayCircle, Upload, FolderUp, Gauge, Network, Cpu, Gi
 import { SectionHeader } from '../components/SectionHeader';
 import { ActivePipelineRun } from '../features/pipeline/ActivePipelineRun';
 import { PipelineVisualizer } from '../features/pipeline/PipelineVisualizer';
+import { PullRequestList } from '../features/pipeline/PullRequestList';
 import { usePipelineStore } from '../stores/usePipelineStore';
 import { useWorkspaceStore } from '../stores/useWorkspaceStore';
 import type { PipelineExecutionData, BuildStepData, CustomAgentData, RepoTrend, AgentAssessment } from '../types';
@@ -201,6 +202,10 @@ export const PipelineTab = ({
               <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_rgba(192,132,252,0.5)]" />
               <span className="text-purple-400">MCP: {uploadedFolders.length + customAgents.length} AGENTS</span>
             </div>
+          </div>
+
+          <div className="w-full max-w-2xl mx-auto">
+            <PullRequestList />
           </div>
 
           {/* Repo URL Ingestion */}
