@@ -12,7 +12,7 @@ interface PipelineStore {
   hookStats: { total: number; enabled: number; byPhase: Record<string, number>; byPipelinePhase: Record<string, number> } | null;
   fixHistory: Array<{ executionId: string; phase: string; timestamp: string; fixed: boolean; attempts: number; diagnosis: string }>;
   
-  startPipeline: (repos: string[]) => void;
+  startPipeline: (repos: string[]) => Promise<void>;
   stopPipeline: () => void;
   clearHistory: () => void;
   clearActiveExecution: () => void;
@@ -29,6 +29,7 @@ interface PipelineStore {
 // Private references that don't trigger re-renders
 let wsInstance: WebSocket | null = null;
 let wsCleanupFunc: (() => void) | null = null;
+let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null; // Fix Issue #6: Module-level timer
 
 export const usePipelineStore = create<PipelineStore>((set, get) => ({
   executions: [],
@@ -47,7 +48,6 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
     if (typeof window === "undefined") return () => {};
 
     const url = get().wsUrl;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
       if (wsInstance) {
@@ -87,7 +87,8 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       ws.onclose = () => {
         set({ wsConnected: false });
         wsInstance = null;
-        reconnectTimer = setTimeout(() => {
+        if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = setTimeout(() => {
           set((s) => ({ wsReconnectAttempts: s.wsReconnectAttempts + 1 }));
           connect();
         }, Math.min(1000 * Math.pow(2, get().wsReconnectAttempts), 30000));
@@ -101,7 +102,10 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
     connect();
 
     const cleanup = () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
       if (wsInstance) {
         wsInstance.onclose = null;
         wsInstance.onerror = null;

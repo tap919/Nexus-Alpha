@@ -28,7 +28,7 @@ import { runTestsCommand, runBuildCommand, runShellCommand } from '../server/rea
 import { saveExecutionLog } from '../server/logService';
 import { runHooksForPhase } from '../server/hookRunner';
 import { BROADCAST_FN } from '../server/broadcastRef';
-import { useSettingsStore } from '../stores/useSettingsStore';
+import { getHooks } from './hookEngine'; // Fix Issue #3: Use server-side hook engine
 import { openPullRequest, generatePrDiff } from './prAgentService';
 
 export interface PhaseResult {
@@ -80,8 +80,8 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   recoverableErrors: [
     'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'timeout', 'ECONNRESET',
     'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'ERR_HTTP_ABORTED',
-    'ETIMEDOUT', 'socket hang up', 'getaddrinfo'
-  ]
+    'socket hang up', 'getaddrinfo'
+  ] // Fix Issue #9: Removed duplicate ETIMEDOUT
 };
 
 function generateErrorId(): string {
@@ -144,7 +144,8 @@ async function executeWithRetry<T>(
     }
   }
 
-  throw lastError;
+  // Fix Issue #5: throw null possible in retry logic
+  throw lastError ?? new Error(`Operation "${operationName}" failed after ${config.maxRetries} attempts`);
 }
 
 async function executePhaseWithRetry(
@@ -232,12 +233,7 @@ FIX_INSTRUCTIONS: <specific steps to fix or explanation>
   };
 }
 
-export interface PhaseResult {
-  phase: string;
-  success: boolean;
-  logs: string[];
-  metrics?: Record<string, unknown>;
-}
+// PhaseResult already declared above
 
 const SLEEP = (ms: number) => new Promise(res => setTimeout(res, ms));
 
@@ -631,7 +627,8 @@ const getRandomMetrics = () => ({
   cpu: 40 + Math.random() * 45,
   memory: 60 + Math.random() * 30,
   disk: 15 + Math.random() * 5,
-  network: 200 + Math.random() * 800
+  network: 200 + Math.random() * 800,
+  isMocked: true // Fix Issue #10: Mark fake metrics
 });
 
 function detectSourceTypes(repos: string[]): { isFolder: boolean; sources: string[]; targetPaths: string[] } {
@@ -785,8 +782,8 @@ export async function runAutomatedPipeline(
       
       // Phase Pre-Hooks
       try {
-        const hookStore = useSettingsStore.getState(); // Assuming hooks are here or in integration store
-        const preHooks = await runHooksForPhase(`${step.phase}:pre`, hookStore.hooks || [], ctx);
+        const hooks = getHooks(); // Fix Issue #3: Server-side access
+        const preHooks = await runHooksForPhase(`${step.phase}:pre`, hooks || [], ctx);
         for (const hr of preHooks) {
           execution.logs.push(`[HOOK] ${hr.success ? 'PASS' : 'FAIL'} Pre-hook: ${hr.hookId}`);
           if (hr.output) execution.logs.push(`[HOOK] Output: ${hr.output.substring(0, 500)}`);
@@ -830,8 +827,8 @@ export async function runAutomatedPipeline(
 
       // Phase Post-Hooks
       try {
-        const hookStore = useSettingsStore.getState();
-        const postHooks = await runHooksForPhase(`${step.phase}:post`, hookStore.hooks || [], ctx);
+        const hooks = getHooks(); // Fix Issue #3: Server-side access
+        const postHooks = await runHooksForPhase(`${step.phase}:post`, hooks || [], ctx);
         for (const hr of postHooks) {
           execution.logs.push(`[HOOK] ${hr.success ? 'PASS' : 'FAIL'} Post-hook: ${hr.hookId}`);
           if (hr.output) execution.logs.push(`[HOOK] Output: ${hr.output.substring(0, 500)}`);

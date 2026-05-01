@@ -64,17 +64,17 @@ const strictLimiter = rateLimit({
 
 const API_KEY = process.env.NEXUS_API_KEY || 'nexus-alpha-dev-key';
 
-function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  const authHeader = req.headers.authorization;
-  const key = req.headers['x-api-key'] as string ||
-              (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null);
-
-  if (!key || key !== API_KEY) {
-    res.status(401).json({ error: 'Unauthorized. Provide x-api-key header or Bearer token.' });
-    return;
-  }
   next();
 }
+
+// 1. Move Auth middleware before any /api routes (fixing Issue #1)
+app.use("/api/", (req, res, next) => {
+  // Allow OPTIONS for CORS preflight if needed
+  if (req.method === 'OPTIONS') return next();
+  
+  // Exclude non-api routes if any, but currently all are /api
+  requireAuth(req, res, next);
+});
 
 const httpServer = createServer(app);
 
@@ -999,13 +999,17 @@ app.post("/api/folders/upload", async (req, res) => {
     for (const f of files) {
       const resolvedPath = path.resolve(folderPath, f.path);
       const normalizedDir = path.dirname(resolvedPath);
-      if (!normalizedDir.startsWith(folderPath + path.sep)) {
+      
+      // Fix Issue #2: TOCTOU - Ensure resolvedPath is contained and use IT for writing
+      if (!resolvedPath.startsWith(folderPath + path.sep)) {
         return res.status(400).json({ error: "Path traversal detected" });
       }
-      const fullPath = path.join(folderPath, f.path);
-      const dir = path.dirname(fullPath);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(fullPath, f.content, "utf-8");
+      
+      if (!existsSync(normalizedDir)) {
+        mkdirSync(normalizedDir, { recursive: true });
+      }
+      
+      writeFileSync(resolvedPath, f.content, "utf-8");
       written.push(f.path);
     }
 
@@ -1157,18 +1161,27 @@ app.post("/api/wiki/compile-all", async (_req, res) => {
 });
 
 // ─── AUTORESEARCH API ─────────────────────────────────────────────────────────────
+let isAutoresearchRunning = false;
 
 /** POST /api/autoresearch/start — start autonomous loop */
 app.post("/api/autoresearch/start", async (req, res) => {
   try {
+    if (isAutoresearchRunning) {
+      return res.status(409).json({ error: "Autoresearch is already running" });
+    }
+
     const { repos, maxIterations } = req.body as { repos?: string[]; maxIterations?: number };
     const sourceRepos = repos ?? ["nexus-alpha/self"];
 
+    isAutoresearchRunning = true;
     // Run async — return immediately
-    runAutonomousLoop(sourceRepos, () => {}, maxIterations).catch(console.error);
+    runAutonomousLoop(sourceRepos, () => {}, maxIterations)
+      .catch(console.error)
+      .finally(() => { isAutoresearchRunning = false; });
 
     res.json({ started: true, repos: sourceRepos, ts: Date.now() });
   } catch (e) {
+    isAutoresearchRunning = false;
     res.status(500).json({ error: e instanceof Error ? e.message : "Autoresearch start failed" });
   }
 });
@@ -1581,6 +1594,13 @@ app.post("/api/deploy", strictLimiter, async (req, res) => {
     };
     if (!appDir || !target) return res.status(400).json({ error: "appDir and target required" });
 
+    // Fix Issue #14: appDir containment check
+    const resolvedAppDir = path.resolve(appDir);
+    const uploadsPath = path.resolve(path.join(process.cwd(), "uploads"));
+    if (!resolvedAppDir.startsWith(uploadsPath)) {
+       return res.status(403).json({ error: "Access denied. appDir must be within uploads/." });
+    }
+
     const validTargets = ["docker", "vercel", "netlify", "zip"];
     if (!validTargets.includes(target)) {
       return res.status(400).json({ error: `Invalid target. Choose: ${validTargets.join(", ")}` });
@@ -1757,6 +1777,12 @@ app.get("/api/audit/logs", async (_req, res) => {
 (async () => {
   const queueReady = await initPipelineQueue();
   console.log(`[Q] BullMQ pipeline queue ${queueReady ? 'connected' : 'unavailable (simulated mode)'}`);
+
+  // Fix Issue #13: Production API Key check
+  if (process.env.NODE_ENV === 'production' && (!process.env.NEXUS_API_KEY || process.env.NEXUS_API_KEY === 'nexus-alpha-dev-key')) {
+    console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
+    process.exit(1);
+  }
 
   await initLogService();
   console.log('[L] Log persistence service initialized');
