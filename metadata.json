@@ -1,6 +1,0 @@
-{
-  "name": "Nexus Alpha: Autonomous Pipeline & RAG Forge",
-  "description": "A mission-critical dashboard for autonomous pipeline orchestration, featuring RAG-integrated browser observations, Playwright-powered E2E testing, and multi-agent synthesis.",
-  "requestFramePermissions": ["autoplay", "fullscreen"],
-  "majorCapabilities": []
-}

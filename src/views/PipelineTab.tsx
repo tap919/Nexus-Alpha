@@ -62,31 +62,30 @@ export const PipelineTab = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: finalUrl }),
       });
-      if (!cloneRes.ok) throw new Error('Clone failed');
+      if (!cloneRes.ok) throw new Error('Clone failed: Backend service unavailable or repository not found');
       const cloned: any = await cloneRes.json();
 
-      const cleanName = \`\${owner}/\${repo}\`;
-      const wikiEntry = \`# Repository: \${cleanName}\\n\\n**URL:** \${finalUrl}\\n**Files:** \${cloned.fileCount}\\n**Languages:** \${cloned.languages?.join(', ') || 'unknown'}\\n**Status:** Cloned and ready for pipeline analysis\\n\\n## Processed Files\\n\${cloned.files?.slice(0, 50).map((f: any) => \`- \${f.relativePath} (\${Math.round(f.size / 1024)}KB)\`).join('\\n') || ''}\\n\`;
+      const cleanName = `${owner}/${repo}`;
+      const wikiEntry = `# Repository: ${cleanName}\n\n**URL:** ${finalUrl}\n**Files:** ${cloned.fileCount}\n**Languages:** ${cloned.languages?.join(', ') || 'unknown'}\n**Status:** Cloned and ready for pipeline analysis\n\n## Processed Files\n${cloned.files?.slice(0, 50).map((f: any) => `- ${f.relativePath} (${Math.round(f.size / 1024)}KB)`).join('\n') || ''}\n`;
       await fetch('/api/wiki/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          source: \`GitHub: \${cleanName}\`,
+          source: `GitHub: ${cleanName}`,
           content: wikiEntry,
           metadata: { pipelineId: cleanName, repoUrl: finalUrl },
         }),
       });
 
-      startPipelineStore([\`folder:\${cloned.path}\`]);
+      startPipelineStore([`folder:${cloned.path}`]);
       
       setRepoUrl('');
       setIngestedRepos(prev => [...prev, { owner, repo, addedAt: new Date().toISOString() }]);
     } catch (e: any) {
-      console.warn('Clone failed:', e.message);
-      // Fallback for real components if backend clone isn't available yet
-      startPipelineStore([\`\${owner}/\${repo}\`]);
+      console.error('Ingest failed:', e.message);
+      // Notify user instead of silent fallback
+      alert(`Ingest Failed: ${e.message}`);
       setRepoUrl('');
-      setIngestedRepos(prev => [...prev, { owner, repo, addedAt: new Date().toISOString() }]);
     }
     setIngesting(false);
   };
@@ -147,11 +146,13 @@ export const PipelineTab = ({
       <div className="flex justify-between items-center mb-8">
         <SectionHeader title="Nexus Automated Pipeline" icon={Activity} />
         <div className="flex gap-4">
-          <div className="px-3 py-1 bg-[#151619] border border-[#2d2e32] rounded text-[10px] font-mono text-[#4a4b50]">
-            WORKERS: 128 ACTIVE
+          <div className="px-3 py-1 bg-[#151619] border border-[#2d2e32] rounded text-[10px] font-mono text-[#4a4b50] flex items-center gap-2">
+            <Cpu size={10} className="text-emerald-500" />
+            WORKERS: {customAgents.length + 4} ACTIVE
           </div>
-          <div className="px-3 py-1 bg-[#151619] border border-[#2d2e32] rounded text-[10px] font-mono text-[#4a4b50]">
-            REGION: GLOBAL_EDGE
+          <div className="px-3 py-1 bg-[#151619] border border-[#2d2e32] rounded text-[10px] font-mono text-[#4a4b50] flex items-center gap-2">
+            <Network size={10} className="text-blue-500" />
+            REGION: {import.meta.env.VITE_REGION || 'LOCAL_HOST'}
           </div>
         </div>
       </div>
@@ -191,9 +192,11 @@ export const PipelineTab = ({
             </button>
           </div>
           <div className="mt-6 flex items-center gap-3 text-[10px] font-mono uppercase tracking-wider">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full">
-              <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shadow-[0_0_8px_rgba(96,165,250,0.5)]" />
-              <span className="text-blue-400">DEEPSEEK V4 READY</span>
+            <div className={`flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-full ${!import.meta.env.VITE_DEEPSEEK_KEY ? 'opacity-50 grayscale' : ''}`}>
+              <div className={`w-2 h-2 rounded-full ${import.meta.env.VITE_DEEPSEEK_KEY ? 'bg-blue-400 animate-pulse' : 'bg-gray-600'} shadow-[0_0_8px_rgba(96,165,250,0.5)]`} />
+              <span className={import.meta.env.VITE_DEEPSEEK_KEY ? 'text-blue-400' : 'text-gray-500'}>
+                {import.meta.env.VITE_DEEPSEEK_KEY ? 'DEEPSEEK V4 READY' : 'DEEPSEEK OFFLINE'}
+              </span>
             </div>
             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.5)]" />

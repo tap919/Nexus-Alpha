@@ -11,6 +11,11 @@ interface PipelineStore {
   hooks: HookConfig[];
   hookStats: { total: number; enabled: number; byPhase: Record<string, number>; byPipelinePhase: Record<string, number> } | null;
   fixHistory: Array<{ executionId: string; phase: string; timestamp: string; fixed: boolean; attempts: number; diagnosis: string }>;
+  
+  // Internal refs (not part of the state proper but managed by the store)
+  _ws: WebSocket | null;
+  _wsCleanup: (() => void) | null;
+
   startPipeline: (repos: string[]) => void;
   stopPipeline: () => void;
   clearHistory: () => void;
@@ -25,10 +30,6 @@ interface PipelineStore {
   fetchFixHistory: () => Promise<void>;
 }
 
-let wsInstance: WebSocket | null = null;
-let wsCleanup: (() => void) | null = null;
-let mockCompletionTimer: ReturnType<typeof setTimeout> | null = null;
-
 export const usePipelineStore = create<PipelineStore>((set, get) => ({
   executions: [],
   activeExecution: null,
@@ -41,23 +42,28 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   hookStats: null,
   fixHistory: [],
 
+  _ws: null,
+  _wsCleanup: null,
+
   connectWebSocket: () => {
-    if (wsCleanup) wsCleanup();
+    const { _wsCleanup, _ws } = get();
+    if (_wsCleanup) _wsCleanup();
     if (typeof window === "undefined") return () => {};
 
     const url = get().wsUrl;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    function connect() {
-      if (wsInstance) {
-        wsInstance.onclose = null;
-        wsInstance.onerror = null;
-        wsInstance.onmessage = null;
-        wsInstance.close();
+    const connect = () => {
+      const currentWs = get()._ws;
+      if (currentWs) {
+        currentWs.onclose = null;
+        currentWs.onerror = null;
+        currentWs.onmessage = null;
+        currentWs.close();
       }
 
       const ws = new WebSocket(url);
-      wsInstance = ws;
+      set({ _ws: ws });
 
       ws.onopen = () => {
         set({ wsConnected: true, wsReconnectAttempts: 0 });
@@ -84,8 +90,7 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       };
 
       ws.onclose = () => {
-        set({ wsConnected: false });
-        wsInstance = null;
+        set({ wsConnected: false, _ws: null });
         reconnectTimer = setTimeout(() => {
           set((s) => ({ wsReconnectAttempts: s.wsReconnectAttempts + 1 }));
           connect();
@@ -95,24 +100,25 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
       ws.onerror = () => {
         ws.close();
       };
-    }
+    };
 
     connect();
 
-    wsCleanup = () => {
+    const cleanup = () => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (wsInstance) {
-        wsInstance.onclose = null;
-        wsInstance.onerror = null;
-        wsInstance.onmessage = null;
-        wsInstance.close();
-        wsInstance = null;
+      const ws = get()._ws;
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        ws.close();
+        set({ _ws: null });
       }
-      set({ wsConnected: false });
-      wsCleanup = null;
+      set({ wsConnected: false, _wsCleanup: null });
     };
 
-    return wsCleanup;
+    set({ _wsCleanup: cleanup });
+    return cleanup;
   },
 
   startPipeline: async (repos) => {
@@ -162,9 +168,6 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event: 'pipeline-run', data: { success: true, repoCount: repos.length } }),
       }).catch(() => {});
-      // Mark websocket update for completion (cancelable)
-      // We no longer fake completion here. We wait for WS events.
-      if (mockCompletionTimer) { clearTimeout(mockCompletionTimer); mockCompletionTimer = null; }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       set((s) => ({
@@ -176,7 +179,6 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   },
 
   stopPipeline: () => {
-    if (mockCompletionTimer) { clearTimeout(mockCompletionTimer); mockCompletionTimer = null; }
     set((s) => ({
       activeExecution: s.activeExecution
         ? { ...s.activeExecution, status: "failed" as const }
@@ -187,7 +189,6 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   clearHistory: () => set({ executions: [], activeExecution: null }),
 
   clearActiveExecution: () => {
-    if (mockCompletionTimer) { clearTimeout(mockCompletionTimer); mockCompletionTimer = null; }
     set({ activeExecution: null });
   },
 

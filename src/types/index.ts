@@ -48,3 +48,13 @@ export type {
   PlanStep,
   PlanApprovalRequest,
 } from './pipeline-extensions';
+
+// ── Legacy aliases used by services/stores ──────────────────────────────────
+export type { BuildStepData as BuildStep } from './pipeline';
+export type { E2EResultData as E2EResult } from './pipeline';
+export type { PipelineExecutionData as PipelineExecution } from './pipeline';
+export type { RAGContextData as RAGContext } from './browser';
+export type { BrowserObservationData as BrowserObservation } from './browser';
+export type { BrowserHistoryItemData as BrowserHistoryItem } from './browser';
+export type { CustomAgentData as CustomAgent } from './agents';
+export type { CLIStateData as CLIState } from './agents';
