@@ -2,12 +2,13 @@ import * as path from 'path';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { getTemplateForDescription, listTemplates } from '../core/agents/templates/registry';
 import { useGuardrailsStore } from './guardrailsService';
+import { initAppMetadata } from '../server/editorService';
 import type { TechStack, GenerationResult as CoreGenerationResult } from '../core/agents/types';
 
 export interface AppSpec {
-  description: string;
   templateId?: string;
   techStack?: Partial<TechStack>;
+  userId: string;
 }
 
 export interface GenerationResult extends Partial<CoreGenerationResult> {
@@ -42,6 +43,7 @@ export class CodingAgentService {
       }
 
       mkdirSync(appRoot, { recursive: true });
+      initAppMetadata(id, spec.userId);
 
       // --- Guard 2: enforce allowed output boundary ---
       if (!appRoot.startsWith(this.OUT_DIR + path.sep)) {

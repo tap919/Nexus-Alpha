@@ -399,6 +399,7 @@ app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, 
   const result = await codingService.generateApp({
     description: body.description,
     templateId: body.templateId, // Passing templateId if user selected one
+    userId: user.sub,
   } as any);
 
   if (result.success) {
@@ -416,7 +417,7 @@ app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, 
       action: 'codegen_failure',
       target: 'codegen',
       status: 'failure',
-      metadata: { error: result.message, description: body.description }
+      metadata: { error: result.message } // Removed description to prevent sensitive leak
     }).catch(() => {});
     return c.json(result, 500);
   }
@@ -424,20 +425,23 @@ app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, 
 
 // ─── Editor API ──────────────────────────────────────────────────────────────
 app.get('/api/editor/list', requireRole(['admin', 'user']), (c) => {
-  return c.json({ apps: listGeneratedApps() });
+  const user = c.get('user');
+  return c.json({ apps: listGeneratedApps(user.sub) });
 });
 
 app.get('/api/editor/tree/:appId', requireRole(['admin', 'user']), (c) => {
+  const user = c.get('user');
   const appId = c.req.param('appId');
-  const tree = listAppFiles(appId);
+  const tree = listAppFiles(appId, user.sub);
   if (!tree) return c.json({ error: 'App not found or access denied' }, 404);
   return c.json({ tree });
 });
 
 app.get('/api/editor/file', requireRole(['admin', 'user']), (c) => {
+  const user = c.get('user');
   const filePath = c.req.query('path');
   if (!filePath) return c.json({ error: 'path is required' }, 400);
-  const content = readAppFile(filePath);
+  const content = readAppFile(filePath, user.sub);
   if (content === null) return c.json({ error: 'File not found or access denied' }, 404);
   return c.json({ content });
 });
@@ -448,7 +452,7 @@ app.post('/api/editor/file', requireRole(['admin', 'user']), strictLimiter, asyn
   if (!body?.path || body.content === undefined) return c.json({ error: 'path and content required' }, 400);
 
   try {
-    writeAppFile(body.path, body.content);
+    writeAppFile(body.path, body.content, user.sub);
     await logAuditEvent({
       actor: user.sub,
       action: 'editor_write',
@@ -470,12 +474,15 @@ app.post('/api/coding/plan', requireRole(['admin', 'user']), strictLimiter, asyn
   // Get current file list for context if appId provided
   let existingFiles: string[] = [];
   if (body.appId) {
-    const tree = listAppFiles(body.appId);
+    const tree = listAppFiles(body.appId, user.sub);
     if (tree) {
-      const flatten = (nodes: any[]): string[] => {
-        return nodes.flatMap(n => n.type === 'file' ? [n.path] : flatten(n.children || []));
-      };
-      existingFiles = flatten(tree);
+      // Iterative flatten to prevent stack overflow
+      const stack = [...tree];
+      while (stack.length > 0) {
+        const node = stack.pop()!;
+        if (node.type === 'file') existingFiles.push(node.path);
+        else if (node.children) stack.push(...node.children);
+      }
     }
   }
 
@@ -594,8 +601,11 @@ app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, asy
           const data = await ollamaRes.json();
           return c.json({ text: data.response, source: 'ollama' });
         }
+        // If local is specifically requested and fails, do NOT fallback to cloud for privacy reasons
+        return c.json({ error: 'Privacy mode active: Local AI unavailable' }, 503);
       } catch (ollamaErr) {
-        console.error('[Ollama] Failed, falling back to Gemini:', (ollamaErr as Error).message);
+        console.error('[Ollama] Local failure in privacy mode:', (ollamaErr as Error).message);
+        return c.json({ error: 'Privacy mode active: Local AI connection failed' }, 503);
       }
     }
 
