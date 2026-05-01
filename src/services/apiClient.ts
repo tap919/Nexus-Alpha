@@ -1,5 +1,6 @@
 import { withBreaker } from '../lib/circuitBreaker';
 import { logger } from '../lib/logger';
+import { getSession } from './authService';
 
 const API_BASE = '/api/proxy';
 
@@ -8,10 +9,17 @@ const PROXY_CIRCUIT = 'api-proxy';
 async function proxyFetch<T>(method: string, url: string, body?: unknown, timeoutMs = 15000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  
+  const session = await getSession();
+  const token = session?.access_token;
+
   try {
     const res = await fetch(url, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        'Authorization': `Bearer ${token}`
+      },
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -45,10 +53,15 @@ export async function streamCLIProxy(
   callbacks?: { onToken?: (t: string) => void; onDone?: () => void; onError?: (e: Error) => void },
 ): Promise<void> {
   try {
+    const session = await getSession();
+    const token = session?.access_token;
     const controller = new AbortController();
     const res = await fetch(`${API_BASE}/cli/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify({ provider, messages, model }),
       signal: controller.signal,
     });

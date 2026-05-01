@@ -29,6 +29,7 @@ import {
   type CheetahPattern,
 } from '../services/cheetahService';
 import { broadcastService } from './broadcastService';
+import { secretsManager, type SecretKey } from './secretsManager';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -378,9 +379,13 @@ app.get('/api/autocoder/status', async (c) => {
 // ─── Gemini proxy ────────────────────────────────────────────────────────────
 app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   try {
+    const user = c.get('user');
     const body = await readJson<{ prompt?: string; model?: string }>(c);
     if (!body?.prompt) return c.json({ error: 'prompt required' }, 400);
-    const apiKey = process.env.GEMINI_API_KEY;
+
+    // Prioritize user secret over system ENV
+    const apiKey = secretsManager.get(user.sub, 'GEMINI_API_KEY') || process.env.GEMINI_API_KEY;
+    
     if (!apiKey) return c.json({ error: 'GEMINI_API_KEY not configured' }, 503);
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
@@ -404,22 +409,25 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
     }>(c);
     if (!body?.provider || !body?.messages) return c.json({ error: 'provider and messages required' }, 400);
 
-    const endpoints: Record<string, { url: string; key: string; model: string }> = {
+    const user = c.get('user');
+    const endpoints: Record<string, { url: string; key: string | undefined; model: string; secretKey: SecretKey }> = {
       openrouter: {
         url: 'https://openrouter.ai/api/v1/chat/completions',
-        key: process.env.OPENROUTER_API_KEY ?? '',
+        key: secretsManager.get(user.sub, 'OPENROUTER_API_KEY') || process.env.OPENROUTER_API_KEY,
         model: body.model ?? 'google/gemini-2.0-flash-001',
+        secretKey: 'OPENROUTER_API_KEY',
       },
       deepseek: {
         url: 'https://api.deepseek.com/v1/chat/completions',
-        key: process.env.DEEPSEEK_API_KEY ?? '',
+        key: secretsManager.get(user.sub, 'DEEPSEEK_API_KEY') || process.env.DEEPSEEK_API_KEY,
         model: body.model ?? 'deepseek-chat',
+        secretKey: 'DEEPSEEK_API_KEY',
       },
     };
 
     const cfg = endpoints[body.provider];
     if (!cfg) return c.json({ error: `Unknown provider: ${body.provider}` }, 400);
-    if (!cfg.key) return c.json({ error: `API key not configured for ${body.provider}` }, 503);
+    if (!cfg.key) return c.json({ error: `API key not configured for ${body.provider} (${cfg.secretKey})` }, 503);
 
     c.header('Content-Type', 'text/event-stream');
     c.header('Cache-Control', 'no-cache');
@@ -466,6 +474,35 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
     return c.json({ error: e instanceof Error ? e.message : 'Stream error' }, 503);
   }
 });
+
+// ─── Secrets Management ───────────────────────────────────────────────────────
+app.get('/api/secrets', requireRole(['admin', 'user']), async (c) => {
+  const user = c.get('user');
+  const keys = secretsManager.list(user.sub);
+  return c.json({ 
+    keys,
+    masked: keys.reduce((acc, k) => {
+      acc[k] = '********';
+      return acc;
+    }, {} as Record<string, string>)
+  });
+});
+
+app.post('/api/secrets/set', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ key: SecretKey; value: string }>(c);
+  if (!body?.key || !body?.value) return c.json({ error: 'key and value required' }, 400);
+  await secretsManager.set(user.sub, body.key, body.value);
+  return c.json({ success: true });
+});
+
+app.delete('/api/secrets/:key', requireRole(['admin', 'user']), async (c) => {
+  const user = c.get('user');
+  const key = c.req.param('key') as SecretKey;
+  await secretsManager.remove(user.sub, key);
+  return c.json({ success: true });
+});
+
 
 // ─── Globals for cleanup ─────────────────────────────────────────────────────
 let wsServer: WebSocketServer | null = null;

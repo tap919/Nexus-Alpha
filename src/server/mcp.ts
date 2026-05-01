@@ -11,18 +11,87 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { searchTrendingRepos, getRepo } from "../services/githubService";
-import { analyzeRepoSynergy } from "../services/geminiService";
-import { runDeterministicBrain, runBrowserHarness } from "./brainToolService";
-import { runQualityGates, getBuildHistory, getLatestScore } from "../services/vibeCoderService";
-import { buildGraph, getGraph, queryGraph, getGraphSummary, graphAvailable } from "../services/graphifyService";
-import { encodeToToon, compressJson, getToonStats } from "../services/toonService";
-import { useGuardrailsStore } from "../services/guardrailsService";
+import { searchTrendingRepos, getRepo } from "../services/githubService.js";
+import { analyzeRepoSynergy } from "../services/geminiService.js";
+import { runDeterministicBrain, runBrowserHarness } from "./brainToolService.js";
+import { runQualityGates, getBuildHistory, getLatestScore } from "../services/vibeCoderService.js";
+import { buildGraph, queryGraph, getGraphSummary, graphAvailable } from "../services/graphifyService.js";
+import { encodeToToon, getToonStats } from "../services/toonService.js";
+import { useGuardrailsStore } from "../services/guardrailsService.js";
+import { logAuditEvent } from "./auditLogService.js";
+import { enqueuePipeline } from "./pipelineQueue.js";
+import path from "path";
 
 const server = new Server(
   { name: "nexus-alpha-mcp", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
+
+// ─── Tool Policy Governance ──────────────────────────────────────────────────
+type ToolCategory = 'read' | 'write' | 'execute' | 'browser' | 'pipeline' | 'ai';
+
+const TOOL_POLICIES: Record<string, { category: ToolCategory; minRole: string }> = {
+  search_repos: { category: 'read', minRole: 'user' },
+  get_repo: { category: 'read', minRole: 'user' },
+  analyze_repo_synergy: { category: 'ai', minRole: 'user' },
+  trigger_pipeline: { category: 'pipeline', minRole: 'admin' },
+  browser_automation: { category: 'browser', minRole: 'agent-runner' },
+  deterministic_brain: { category: 'ai', minRole: 'agent-runner' },
+  vibe_check: { category: 'execute', minRole: 'user' },
+  vibe_history: { category: 'read', minRole: 'user' },
+  vibe_score: { category: 'read', minRole: 'user' },
+  graphify_build: { category: 'execute', minRole: 'admin' },
+  graphify_query: { category: 'read', minRole: 'user' },
+  graphify_summary: { category: 'read', minRole: 'user' },
+  toon_compress: { category: 'ai', minRole: 'user' },
+  toon_stats: { category: 'read', minRole: 'user' },
+  sequential_think: { category: 'ai', minRole: 'user' },
+};
+
+async function authorizeTool(name: string, args: any): Promise<void> {
+  const policy = TOOL_POLICIES[name];
+  if (!policy) throw new Error(`Security Violation: Unrecognized tool "${name}"`);
+
+  // Default MCP identity for stdio-based calls
+  const actor = process.env.NEXUS_MCP_IDENTITY || "mcp-stdio-client";
+  const role = process.env.NEXUS_MCP_ROLE || "user";
+
+  // 1. Role Check
+  const roles = ['user', 'agent-runner', 'admin', 'system'];
+  if (roles.indexOf(role) < roles.indexOf(policy.minRole)) {
+    await logAuditEvent({
+      actor,
+      action: 'mcp_rbac_denied',
+      target: name,
+      status: 'failure',
+      metadata: { role, required: policy.minRole }
+    }).catch(() => {});
+    throw new Error(`Forbidden: Tool "${name}" requires "${policy.minRole}" role.`);
+  }
+
+  // 2. Guardrails Check
+  const { validateAction } = useGuardrailsStore.getState();
+  const { allowed, reason } = validateAction(policy.category as any, JSON.stringify(args));
+  if (!allowed) {
+    await logAuditEvent({
+      actor,
+      action: 'mcp_guardrail_denied',
+      target: name,
+      status: 'failure',
+      metadata: { reason, args }
+    }).catch(() => {});
+    throw new Error(`Guardrail Violation: ${reason}`);
+  }
+
+  // 3. Log Intent
+  await logAuditEvent({
+    actor,
+    action: 'mcp_tool_call',
+    target: name,
+    status: 'success',
+    metadata: { args }
+  }).catch(() => {});
+}
 
 // ─── Tool Definitions ──────────────────────────────────────────────────────────
 
@@ -85,13 +154,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "browser_automation",
-      description: "Control a browser via CDP using browser-harness. Use for automation, scraping, or web interactions. Requires browser-harness CLI installed and Chrome/Edge running.",
+      description: "Control a headless browser using a Playwright-based DSL. Use for automation, scraping, or web interactions. Isolated incognito context is created per call.",
       inputSchema: {
         type: "object",
         properties: {
           command: {
             type: "string",
-            description: "Python code to execute via browser-harness. Example: new_tab('https://google.com'); wait_for_load(); print(page_info())",
+            description: "DSL statements to execute. Example: new_tab('https://google.com'); wait_for_load(); print(page_info())",
           },
         },
         required: ["command"],
@@ -291,6 +360,9 @@ function generateSequentialThinking(query: string, totalSteps: number, branch?: 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
+  // Systemic Governance Layer
+  await authorizeTool(name, args);
+
   switch (name) {
     case "search_repos": {
       const { query, days = 7 } = args as { query: string; days?: number };
@@ -358,24 +430,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     case "trigger_pipeline": {
       const { repos, agentId } = args as { repos: string[]; agentId?: string };
-      // Trigger via the REST API server
-      const PORT = process.env.PORT || '3002';
-      const res = await fetch(`http://localhost:${PORT}/api/pipeline/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repos, agentId }),
-      });
-      const data = await res.json();
+      // Direct call to queue to avoid unauthenticated HTTP hop
+      const userId = process.env.NEXUS_MCP_IDENTITY || "mcp-stdio-system";
+      const result = await enqueuePipeline(repos, userId, agentId);
       return {
-        content: [{ type: "text", text: `Pipeline started. ID: ${data.executionId}` }],
+        content: [{ type: "text", text: `Pipeline ${result.simulated ? 'simulated' : 'enqueued'}. ID: ${result.id}` }],
       };
     }
-
-    case "browser_automation": {
-      const { command } = args as { command: string };
-      const { validateAction } = useGuardrailsStore.getState();
-      const { allowed, reason } = validateAction('command', command);
-      if (!allowed) throw new Error(reason);
 
       try {
         const result = await runBrowserHarness({ command });
@@ -388,12 +449,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
     }
-
-    case "deterministic_brain": {
-      const { query, lane, verbose } = args as { query: string; lane?: string; verbose?: boolean };
-      const { validateAction } = useGuardrailsStore.getState();
-      const { allowed, reason } = validateAction('command', query); // Brain queries can trigger commands
-      if (!allowed) throw new Error(reason);
 
       try {
         const result = await runDeterministicBrain({ query, lane: lane as "coding" | "business_logic" | "agent_brain" | "tool_calling" | "cross_domain" | undefined, verbose });
@@ -442,14 +497,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    case "graphify_build": {
       const { targetPath = ".", mode = "ast" } = args as { targetPath?: string; mode?: "ast" | "deep" };
+      
+      // Filesystem Sandboxing: Ensure targetPath is within project root
+      const fullPath = path.resolve(process.cwd(), targetPath);
+      if (!fullPath.startsWith(process.cwd())) {
+        throw new Error(`Security Violation: targetPath "${targetPath}" is outside the project root.`);
+      }
+
       if (!graphAvailable()) {
         return {
           content: [{ type: "text", text: "Graphify not installed. Run: pip install graphifyy && graphify install" }],
         };
       }
-      const result = await buildGraph(targetPath, mode);
+      const result = await buildGraph(fullPath, mode);
       return {
         content: [{ type: "text", text: JSON.stringify({
           nodeCount: result.nodeCount,

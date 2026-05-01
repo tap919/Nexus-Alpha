@@ -14,65 +14,66 @@ export type SecretKey =
   | "SUPABASE_ANON_KEY"
   | "OPENCODE_API_KEY";
 
-const STORAGE_PREFIX = "__nexus_secret_";
+import { getSession } from "./authService";
 
-function encode(value: string): string {
-  return btoa(encodeURIComponent(value));
-}
+async function fetchWithAuth(url: string, options: RequestInit = {}) {
+  const session = await getSession();
+  const token = session?.access_token;
+  
+  const headers = {
+    ...options.headers as any,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
 
-function decode(encoded: string): string {
-  return decodeURIComponent(atob(encoded));
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
 export const secretsService = {
-  set(key: SecretKey, value: string): void {
-    sessionStorage.setItem(STORAGE_PREFIX + key, encode(value));
+  async set(key: SecretKey, value: string): Promise<void> {
+    await fetchWithAuth('/api/secrets/set', {
+      method: 'POST',
+      body: JSON.stringify({ key, value })
+    });
   },
 
-  get(key: SecretKey): string | null {
-    const raw = sessionStorage.getItem(STORAGE_PREFIX + key);
-    if (!raw) return null;
-    try {
-      return decode(raw);
-    } catch {
-      return null;
+  async get(key: SecretKey): Promise<string | null> {
+    // Note: Server-side secrets manager does not return the full secret to the client for safety.
+    // The client only needs to know if it exists (for UI) or use it via proxy routes.
+    const keys = await this.list();
+    return keys.includes(key) ? '********' : null;
+  },
+
+  async remove(key: SecretKey): Promise<void> {
+    await fetchWithAuth(`/api/secrets/${key}`, { method: 'DELETE' });
+  },
+
+  async clear(): Promise<void> {
+    const keys = await this.list();
+    for (const key of keys) {
+      await this.remove(key);
     }
   },
 
-  remove(key: SecretKey): void {
-    sessionStorage.removeItem(STORAGE_PREFIX + key);
+  async list(): Promise<SecretKey[]> {
+    const data = await fetchWithAuth('/api/secrets');
+    return data.keys as SecretKey[];
   },
 
-  clear(): void {
-    const toRemove: string[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const k = sessionStorage.key(i);
-      if (k?.startsWith(STORAGE_PREFIX)) toRemove.push(k);
-    }
-    toRemove.forEach((k) => sessionStorage.removeItem(k));
+  async has(key: SecretKey): Promise<boolean> {
+    const keys = await this.list();
+    return keys.includes(key);
   },
 
-  list(): SecretKey[] {
-    const keys: SecretKey[] = [];
-    for (let i = 0; i < sessionStorage.length; i++) {
-      const k = sessionStorage.key(i);
-      if (k?.startsWith(STORAGE_PREFIX)) {
-        keys.push(k.replace(STORAGE_PREFIX, "") as SecretKey);
-      }
-    }
-    return keys;
-  },
-
-  has(key: SecretKey): boolean {
-    return sessionStorage.getItem(STORAGE_PREFIX + key) !== null;
-  },
-
-  /** Mask value for display: shows only last 4 chars */
-  mask(key: SecretKey): string {
-    const value = this.get(key);
-    if (!value) return "(not set)";
-    if (value.length <= 4) return "****";
-    return `${"..".repeat(4)}${value.slice(-4)}`;
+  /** Mask value for display: shows placeholder since real value is on server */
+  async mask(key: SecretKey): Promise<string> {
+    const exists = await this.has(key);
+    return exists ? "********" : "(not set)";
   },
 };
 
