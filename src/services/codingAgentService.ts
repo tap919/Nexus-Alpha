@@ -1,10 +1,15 @@
 import * as path from 'path';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
-import { getTemplateForDescription } from '../core/agents/templates/registry';
+import { getTemplateForDescription, listTemplates } from '../core/agents/templates/registry';
 import { useGuardrailsStore } from './guardrailsService';
-import type { AppSpec, GenerationResult as CoreGenerationResult } from '../core/agents/types';
+import type { TechStack, GenerationResult as CoreGenerationResult } from '../core/agents/types';
 
-export type { AppSpec };
+export interface AppSpec {
+  description: string;
+  templateId?: string;
+  techStack?: Partial<TechStack>;
+}
+
 export interface GenerationResult extends Partial<CoreGenerationResult> {
   appPath: string;
   success: boolean;
@@ -49,7 +54,14 @@ export class CodingAgentService {
       }
 
       // --- Delegate scaffold writing ---
-      const template = getTemplateForDescription(spec.description);
+      let template = null;
+      if (spec.templateId) {
+        template = listTemplates().find(t => t.appType === spec.templateId);
+      }
+      if (!template) {
+        template = getTemplateForDescription(spec.description);
+      }
+
       if (template?.scaffold) {
         await template.scaffold(appRoot, spec);
       } else {

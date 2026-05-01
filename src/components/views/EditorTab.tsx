@@ -1,117 +1,229 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { CodeEditor } from '../components/CodeEditor';
-import { FileCode, FolderOpen, Plus, Search, Settings, X } from 'lucide-react';
+import { 
+  FileCode, 
+  FolderOpen, 
+  Plus, 
+  Search, 
+  ChevronRight, 
+  ChevronDown, 
+  Box,
+  RefreshCw,
+  HardDrive
+} from 'lucide-react';
 
-interface FileTab {
-  id: string;
+interface FileNode {
   name: string;
-  language: string;
-  content: string;
+  path: string;
+  type: 'file' | 'dir';
+  children?: FileNode[];
 }
 
-const defaultFiles: FileTab[] = [
-  { id: '1', name: 'main.ts', language: 'typescript', content: `// Welcome to Nexus Alpha Editor\n// Start building your application\n\nfunction greet(name: string): string {\n  return \`Hello, \${name}!\`;\n}\n\nconsole.log(greet('Developer'));` },
-  { id: '2', name: 'utils.ts', language: 'typescript', content: `export function formatDate(date: Date): string {\n  return date.toLocaleDateString('en-US', {\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric'\n  });\n}` },
-];
+interface AppInfo {
+  id: string;
+  path: string;
+  createdAt: string;
+}
 
 export default function EditorTab() {
-  const [files, setFiles] = useState<FileTab[]>(defaultFiles);
-  const [activeFileId, setActiveFileId] = useState('1');
+  const [apps, setApps] = useState<AppInfo[]>([]);
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [fileTree, setFileTree] = useState<FileNode[]>([]);
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [activeContent, setActiveContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
 
-  const activeFile = files.find(f => f.id === activeFileId);
+  useEffect(() => {
+    fetchApps();
+  }, []);
 
-  const handleSave = (content: string) => {
-    setFiles(files.map(f => f.id === activeFileId ? { ...f, content } : f));
-    console.log('File saved:', activeFile?.name);
+  const fetchApps = async () => {
+    try {
+      const res = await fetch('/api/editor/list');
+      const data = await res.json();
+      if (data.apps) {
+        setApps(data.apps);
+        if (data.apps.length > 0 && !selectedAppId) {
+          handleSelectApp(data.apps[data.apps.length - 1].id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch apps', e);
+    }
+  };
+
+  const handleSelectApp = async (id: string) => {
+    setSelectedAppId(id);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/editor/tree/${id}`);
+      const data = await res.json();
+      if (data.tree) {
+        setFileTree(data.tree);
+        setActiveFilePath(null);
+        setActiveContent(null);
+      }
+    } catch (e) {
+      console.error('Failed to fetch tree', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileClick = async (filePath: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/editor/file?path=${encodeURIComponent(filePath)}`);
+      const data = await res.json();
+      if (data.content !== undefined) {
+        setActiveFilePath(filePath);
+        setActiveContent(data.content);
+      }
+    } catch (e) {
+      console.error('Failed to read file', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async (content: string) => {
+    if (!activeFilePath) return;
+    try {
+      const res = await fetch('/api/editor/file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: activeFilePath, content })
+      });
+      if (res.ok) {
+        setActiveContent(content);
+      }
+    } catch (e) {
+      console.error('Failed to save file', e);
+    }
+  };
+
+  const toggleDir = (path: string) => {
+    setExpandedDirs(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  const renderTree = (nodes: FileNode[], level = 0) => {
+    return nodes.map((node) => {
+      const isExpanded = expandedDirs[node.path];
+      const isSelected = activeFilePath === node.path;
+
+      if (node.type === 'dir') {
+        return (
+          <div key={node.path}>
+            <button
+              onClick={() => toggleDir(node.path)}
+              className="w-full flex items-center gap-1 px-2 py-1 hover:bg-white/5 rounded text-sm text-gray-400"
+              style={{ paddingLeft: `${level * 12 + 8}px` }}
+            >
+              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <FolderOpen size={14} className="text-indigo-400/70" />
+              <span className="truncate">{node.name}</span>
+            </button>
+            {isExpanded && node.children && renderTree(node.children, level + 1)}
+          </div>
+        );
+      }
+
+      return (
+        <button
+          key={node.path}
+          onClick={() => handleFileClick(node.path)}
+          className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-left transition-colors ${
+            isSelected ? 'bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+          }`}
+          style={{ paddingLeft: `${level * 12 + 24}px` }}
+        >
+          <FileCode size={14} className={isSelected ? 'text-indigo-400' : 'text-gray-500'} />
+          <span className="truncate">{node.name}</span>
+        </button>
+      );
+    });
   };
 
   return (
-    <div className="flex h-full">
-      <div className="w-48 border-r border-gray-800 bg-[#1a1a1a] flex flex-col">
-        <div className="p-3 border-b border-gray-800">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Explorer</span>
-            <button className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-white">
-              <Plus className="w-4 h-4" />
+    <div className="flex h-[calc(100vh-140px)] border border-white/5 rounded-2xl overflow-hidden bg-[#0A0A0B]">
+      {/* Sidebar: App Selector + File Tree */}
+      <div className="w-64 border-r border-white/5 flex flex-col bg-[#0D0D0E]">
+        <div className="p-4 border-b border-white/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <HardDrive size={16} className="text-indigo-400" />
+              <span className="text-xs font-bold uppercase tracking-widest text-white">Project Registry</span>
+            </div>
+            <button onClick={fetchApps} className="p-1 hover:bg-white/5 rounded text-gray-500 hover:text-indigo-400 transition-colors">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
-          <div className="relative">
-            <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input 
-              type="text" 
-              placeholder="Search files..."
-              className="w-full bg-[#252526] text-sm text-gray-300 pl-7 pr-2 py-1 rounded border border-transparent focus:border-indigo-500/50 outline-none"
-            />
-          </div>
+          
+          <select 
+            value={selectedAppId || ''} 
+            onChange={(e) => handleSelectApp(e.target.value)}
+            className="w-full bg-[#151517] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500/50"
+          >
+            {apps.length === 0 && <option>No apps found</option>}
+            {apps.map(app => (
+              <option key={app.id} value={app.id}>{app.id}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
-          <div className="flex items-center gap-1 text-gray-400 text-sm mb-2 px-1">
-            <FolderOpen className="w-4 h-4" />
-            <span>src</span>
-          </div>
-          {files.map(file => (
-            <button
-              key={file.id}
-              onClick={() => setActiveFileId(file.id)}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-left transition-colors ${
-                activeFileId === file.id 
-                  ? 'bg-indigo-500/20 text-indigo-300' 
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-              }`}
-            >
-              <FileCode className="w-4 h-4" />
-              {file.name}
-            </button>
-          ))}
+        <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+          {loading && !fileTree.length ? (
+            <div className="flex flex-col items-center justify-center h-32 gap-2 opacity-50">
+              <div className="w-4 h-4 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              <span className="text-[10px] font-mono text-gray-500">Indexing...</span>
+            </div>
+          ) : (
+            <div className="space-y-0.5">
+              {renderTree(fileTree)}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center bg-[#1a1a1a] border-b border-gray-800 overflow-x">
-          {files.map(file => (
-            <div 
-              key={file.id}
-              className={`flex items-center gap-2 px-3 py-2 border-r border-gray-800 cursor-pointer transition-colors ${
-                activeFileId === file.id 
-                  ? 'bg-[#1e1e1e] text-white' 
-                  : 'text-gray-400 hover:bg-[#252526] hover:text-white'
-              }`}
-              onClick={() => setActiveFileId(file.id)}
-            >
-              <FileCode className="w-4 h-4" />
-              <span className="text-sm">{file.name}</span>
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFiles(files.filter(f => f.id !== file.id));
-                  if (activeFileId === file.id && files.length > 1) {
-                    setActiveFileId(files.find(f => f.id !== file.id)?.id || '');
-                  }
-                }}
-                className="p-0.5 hover:bg-gray-700 rounded opacity-60 hover:opacity-100"
-              >
-                <X className="w-3 h-3" />
-              </button>
+      {/* Main Editor Area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-[#0F0F11]">
+        <div className="h-10 flex items-center bg-[#0D0D0E] border-b border-white/5 px-4">
+          {activeFilePath ? (
+            <div className="flex items-center gap-2">
+              <FileCode size={14} className="text-indigo-400" />
+              <span className="text-xs font-mono text-gray-300">{activeFilePath}</span>
             </div>
-          ))}
+          ) : (
+            <span className="text-xs font-mono text-gray-600">No file active</span>
+          )}
         </div>
 
-        <div className="flex-1 min-h-0 p-4 bg-[#1e1e1e]">
-          {activeFile && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="h-full"
-            >
-              <CodeEditor
-                initialValue={activeFile.content}
-                language={activeFile.language}
-                onSave={handleSave}
-              />
-            </motion.div>
-          )}
+        <div className="flex-1 relative">
+          <AnimatePresence mode="wait">
+            {activeContent !== null ? (
+              <motion.div
+                key={activeFilePath}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0"
+              >
+                <CodeEditor
+                  initialValue={activeContent}
+                  language={activeFilePath?.split('.').pop() || 'typescript'}
+                  onSave={handleSave}
+                />
+              </motion.div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full opacity-30 select-none">
+                <Box size={48} className="text-indigo-500 mb-4" />
+                <p className="text-sm font-mono uppercase tracking-[0.2em] text-indigo-300">Select an artifact to edit</p>
+                <p className="text-[10px] mt-2 text-gray-500">All writes are strictly guarded by Nexus RBAC</p>
+              </div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

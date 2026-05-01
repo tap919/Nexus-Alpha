@@ -30,6 +30,10 @@ import {
 } from '../services/cheetahService';
 import { broadcastService } from './broadcastService';
 import { secretsManager, type SecretKey } from './secretsManager';
+import { listGeneratedApps, listAppFiles, readAppFile, writeAppFile } from './editorService';
+import { listTemplates, getTemplateForDescription } from '../core/agents/templates/registry';
+import CodingAgentService from '../services/codingAgentService';
+import { settingsService, type PrivacyMode } from './settingsService';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -376,12 +380,128 @@ app.get('/api/autocoder/status', async (c) => {
   }
 });
 
+// ─── Coding & Agents ─────────────────────────────────────────────────────────
+const codingService = new CodingAgentService();
+
+app.get('/api/coding/templates', requireRole(['admin', 'user']), (c) => {
+  return c.json({ templates: listTemplates() });
+});
+
+app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ description: string; templateId?: string; privacyPreference?: 'local' | 'cloud' }>(c);
+  
+  if (!body?.description) return c.json({ error: 'description is required' }, 400);
+
+  const result = await codingService.generateApp({
+    description: body.description,
+    templateId: body.templateId, // Passing templateId if user selected one
+  } as any);
+
+  if (result.success) {
+    await logAuditEvent({
+      actor: user.sub,
+      action: 'codegen_success',
+      target: result.appPath,
+      status: 'success',
+      metadata: { templateId: result.templateId, files: result.files?.length }
+    }).catch(() => {});
+    return c.json(result);
+  } else {
+    await logAuditEvent({
+      actor: user.sub,
+      action: 'codegen_failure',
+      target: 'codegen',
+      status: 'failure',
+      metadata: { error: result.message, description: body.description }
+    }).catch(() => {});
+    return c.json(result, 500);
+  }
+});
+
+// ─── Editor API ──────────────────────────────────────────────────────────────
+app.get('/api/editor/list', requireRole(['admin', 'user']), (c) => {
+  return c.json({ apps: listGeneratedApps() });
+});
+
+app.get('/api/editor/tree/:appId', requireRole(['admin', 'user']), (c) => {
+  const appId = c.req.param('appId');
+  const tree = listAppFiles(appId);
+  if (!tree) return c.json({ error: 'App not found or access denied' }, 404);
+  return c.json({ tree });
+});
+
+app.get('/api/editor/file', requireRole(['admin', 'user']), (c) => {
+  const filePath = c.req.query('path');
+  if (!filePath) return c.json({ error: 'path is required' }, 400);
+  const content = readAppFile(filePath);
+  if (content === null) return c.json({ error: 'File not found or access denied' }, 404);
+  return c.json({ content });
+});
+
+app.post('/api/editor/file', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ path: string; content: string }>(c);
+  if (!body?.path || body.content === undefined) return c.json({ error: 'path and content required' }, 400);
+
+  try {
+    writeAppFile(body.path, body.content);
+    await logAuditEvent({
+      actor: user.sub,
+      action: 'editor_write',
+      target: body.path,
+      status: 'success'
+    }).catch(() => {});
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 403);
+  }
+});    
+
+// ─── Settings API ────────────────────────────────────────────────────────────
+app.get('/api/settings', requireRole(['admin', 'user']), (c) => {
+  return c.json(settingsService.getSettings());
+});
+
+app.post('/api/settings/privacy-mode', requireRole(['admin', 'user']), async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ mode: PrivacyMode }>(c);
+  if (!body?.mode) return c.json({ error: 'mode required' }, 400);
+  
+  settingsService.setPrivacyMode(body.mode);
+  await logAuditEvent({
+    actor: user.sub,
+    action: 'privacy_mode_change',
+    target: 'settings',
+    status: 'success',
+    metadata: { mode: body.mode }
+  }).catch(() => {});
+  
+  return c.json({ success: true, mode: body.mode });
+});
+
 // ─── Gemini proxy ────────────────────────────────────────────────────────────
 app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, async (c) => {
   try {
     const user = c.get('user');
     const body = await readJson<{ prompt?: string; model?: string }>(c);
     if (!body?.prompt) return c.json({ error: 'prompt required' }, 400);
+
+    // Local-First Routing
+    if (settingsService.isLocalMode()) {
+      try {
+        const ollamaRes = await fetch('http://localhost:11434/api/generate', {
+          method: 'POST',
+          body: JSON.stringify({ model: 'llama3', prompt: body.prompt, stream: false }),
+        });
+        if (ollamaRes.ok) {
+          const data = await ollamaRes.json();
+          return c.json({ text: data.response, source: 'ollama' });
+        }
+      } catch (ollamaErr) {
+        console.error('[Ollama] Failed, falling back to Gemini:', (ollamaErr as Error).message);
+      }
+    }
 
     // Prioritize user secret over system ENV
     const apiKey = (await secretsManager.get(user.sub, 'GEMINI_API_KEY')) || process.env.GEMINI_API_KEY;
@@ -393,7 +513,7 @@ app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, asy
       model: body.model ?? 'gemini-2.0-flash',
       contents: body.prompt,
     });
-    return c.json({ text: result.text });
+    return c.json({ text: result.text, source: 'gemini' });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'Gemini unavailable' }, 503);
   }

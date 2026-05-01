@@ -17,15 +17,35 @@ function PrivacyModePanel() {
   const [selectedModel, setSelectedModel] = useState('llama3.1');
 
   useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.privacyMode !== undefined) {
+          setPrivacyMode(data.privacyMode === 'local');
+        }
+      });
+  }, []);
+
+  useEffect(() => {
     if (privacyMode) {
       ollamaService.listModels().then(setOllamaModels);
     }
   }, [privacyMode]);
 
-  const toggle = () => {
+  const toggle = async () => {
     const next = !privacyMode;
-    setPrivacyMode(next);
-    localStorage.setItem('nexus_privacy_mode', String(next));
+    try {
+      const res = await fetch('/api/settings/privacy-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: next ? 'local' : 'cloud' })
+      });
+      if (res.ok) {
+        setPrivacyMode(next);
+      }
+    } catch (e) {
+      console.error('Failed to sync privacy mode', e);
+    }
   };
 
   return (
