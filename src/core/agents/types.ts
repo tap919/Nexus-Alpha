@@ -64,3 +64,18 @@ export const APP_TYPE_LABELS: Record<AppType, string> = {
   todo: 'Todo App',
   custom: 'Custom Application',
 };
+
+export interface PlanStep {
+  id: string;
+  file: string;
+  action: 'create' | 'modify' | 'delete';
+  purpose: string;
+  status: 'pending' | 'completed' | 'failed';
+}
+
+export interface MultiFilePlan {
+  id: string;
+  title: string;
+  summary: string;
+  steps: PlanStep[];
+}

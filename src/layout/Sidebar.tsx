@@ -1,13 +1,14 @@
 import { useState, type ElementType } from 'react';
-import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield, Brain, FileCode, GitCompare, Database, Eye, Package, Cpu, Wand2, Trophy } from 'lucide-react';
+import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield, Brain, FileCode, GitCompare, Database, Eye, Package, Cpu, Wand2, Trophy, ClipboardList } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SystemManifest } from './SystemManifest';
 
-export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit' | 'Mission Control' | 'Editor' | 'Changes' | 'Memory' | 'Preview' | 'Extensions' | 'System' | 'Agent Eval' | 'Magic';
+export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit' | 'Mission Control' | 'Editor' | 'Changes' | 'Memory' | 'Preview' | 'Extensions' | 'System' | 'Agent Eval' | 'Magic' | 'Review';
 
 const PRIMARY_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Sparkles, label: 'Composer' },
   { icon: FileCode, label: 'Editor' },
+  { icon: ClipboardList, label: 'Review' },
   { icon: Wand2, label: 'Magic' },
   { icon: Database, label: 'Memory' },
   { icon: Eye, label: 'Preview' },

@@ -34,6 +34,7 @@ import { listGeneratedApps, listAppFiles, readAppFile, writeAppFile } from './ed
 import { listTemplates, getTemplateForDescription } from '../core/agents/templates/registry';
 import CodingAgentService from '../services/codingAgentService';
 import { settingsService, type PrivacyMode } from './settingsService';
+import { plannerAgent } from '../core/agents/plannerAgent';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -457,6 +458,58 @@ app.post('/api/editor/file', requireRole(['admin', 'user']), strictLimiter, asyn
     return c.json({ error: (err as Error).message }, 403);
   }
 });    
+
+// ─── Planning API ────────────────────────────────────────────────────────────
+app.post('/api/coding/plan', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ description: string; appId?: string }>(c);
+  if (!body?.description) return c.json({ error: 'description required' }, 400);
+
+  // Get current file list for context if appId provided
+  let existingFiles: string[] = [];
+  if (body.appId) {
+    const tree = listAppFiles(body.appId);
+    if (tree) {
+      const flatten = (nodes: any[]): string[] => {
+        return nodes.flatMap(n => n.type === 'file' ? [n.path] : flatten(n.children || []));
+      };
+      existingFiles = flatten(tree);
+    }
+  }
+
+  try {
+    const plan = await plannerAgent.createPlan(body.description, { existingFiles });
+    await logAuditEvent({
+      actor: user.sub,
+      action: 'codegen_plan',
+      target: body.appId || 'new_app',
+      status: 'success',
+      metadata: { title: plan.title, steps: plan.steps.length }
+    }).catch(() => {});
+    
+    return c.json(plan);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+app.post('/api/coding/plan/apply', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  const user = c.get('user');
+  const body = await readJson<{ planId: string; stepId?: string }>(c);
+  if (!body?.planId) return c.json({ error: 'planId required' }, 400);
+
+  // In Phase 2, this would trigger the actual file writes or Temporal workflow
+  // For now, we simulate success
+  await logAuditEvent({
+    actor: user.sub,
+    action: 'codegen_apply',
+    target: body.planId,
+    status: 'success',
+    metadata: { stepId: body.stepId }
+  }).catch(() => {});
+
+  return c.json({ success: true, message: 'Plan application initiated' });
+});
 
 // ─── Settings API ────────────────────────────────────────────────────────────
 app.get('/api/settings', requireRole(['admin', 'user']), (c) => {

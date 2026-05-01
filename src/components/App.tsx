@@ -32,6 +32,7 @@ const ExtensionsTab = lazy(() => import('../features/extensions/ExtensionsPanel'
 const SystemTab = lazy(() => import('../features/system/SystemPanel').then(m => ({ default: m.SystemPanel })));
 const AgentEvalTab = lazy(() => import('./views/AgentEvalTab').then(m => ({ default: m.AgentEvalTab })));
 const MagicTab = lazy(() => import('../features/composer/MagicComposer').then(m => ({ default: m.MagicComposer })));
+const PlanReviewTab = lazy(() => import('./views/PlanReviewTab'));
 
 export default function App() {
   const {
@@ -93,6 +94,7 @@ export default function App() {
               {activeTab === 'Settings' && <SettingsTab />}
               {activeTab === 'Agent Eval' && <AgentEvalTab />}
               {activeTab === 'Magic' && <MagicTab />}
+              {activeTab === 'Review' && <PlanReviewTab />}
             </Suspense>
           </div>
         </div>
