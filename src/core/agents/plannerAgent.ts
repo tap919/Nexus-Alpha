@@ -1,5 +1,6 @@
 import { callGeminiProxy } from "../../services/apiClient";
 import { logger } from "../../lib/logger";
+import { wikiGenService } from "../../services/wikiGenService";
 import type { MultiFilePlan, PlanStep } from "./types";
 
 export class PlannerAgent {
@@ -10,8 +11,13 @@ export class PlannerAgent {
   async createPlan(prompt: string, context: { existingFiles: string[] }): Promise<MultiFilePlan> {
     logger.info('PlannerAgent', `Generating plan for: ${prompt}`);
 
+    const wikiContext = wikiGenService.getWikiContext();
     const systemPrompt = `You are the Nexus Alpha Architect Agent. 
 Your goal is to decompose a user request into a precise multi-file execution plan.
+
+--- PROJECT WIKI (ARCHITECTURAL KNOWLEDGE) ---
+${wikiContext}
+--- END PROJECT WIKI ---
 
 CONTEXT:
 Existing Files: ${context.existingFiles.join(', ')}

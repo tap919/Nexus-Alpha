@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { 
-  Play, Pause, Square, RotateCcw, Bot, Brain, 
-  Terminal, Activity, Clock, CheckCircle, XCircle,
-  AlertTriangle, Cpu, MemoryStick, Network
+  AlertTriangle, Cpu, MemoryStick, Network, Sliders, ShieldAlert,
+  Zap, Info, ListTodo
 } from 'lucide-react';
+import { kernelService } from '../../services/kernelService';
 
 interface Agent {
   id: string;
@@ -34,6 +34,16 @@ export default function MissionControlTab() {
   const [pool, setPool] = useState<AgentPool>({ active: 1, idle: 2, max: 5 });
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [isAllPaused, setIsAllPaused] = useState(false);
+  const [autonomy, setAutonomy] = useState(50);
+  const [temperature, setTemperature] = useState(0.2);
+  const [kernelStatus, setKernelStatus] = useState(kernelService.getKernelStatus());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setKernelStatus(kernelService.getKernelStatus());
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handlePauseAll = () => {
     setIsAllPaused(!isAllPaused);
@@ -238,9 +248,101 @@ export default function MissionControlTab() {
           ))}
         </div>
 
-        <div className="space-y-4">
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {/* Agency & Psychology Sliders */}
+          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-400" />
+                Agency Controls
+              </h2>
+              <Info className="w-3 h-3 text-gray-500 cursor-help" />
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase">
+                  <span>Autonomy Level</span>
+                  <span className="text-indigo-400">{autonomy}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" max="100" 
+                  value={autonomy}
+                  onChange={(e) => setAutonomy(Number(e.target.value))}
+                  className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+                <div className="flex justify-between text-[8px] text-gray-600 uppercase font-mono">
+                  <span>Consultant</span>
+                  <span>Co-Pilot</span>
+                  <span>Architect</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase">
+                  <span>Safety Temp</span>
+                  <span className="text-amber-400">{temperature}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" max="100" 
+                  value={temperature * 100}
+                  onChange={(e) => setTemperature(Number(e.target.value) / 100)}
+                  className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+                <div className="flex justify-between text-[8px] text-gray-600 uppercase font-mono">
+                  <span>Deterministic</span>
+                  <span>Creative</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-800 flex items-center gap-3">
+              <ShieldAlert className="w-4 h-4 text-emerald-400" />
+              <div className="text-[10px] text-gray-400 leading-tight">
+                <span className="text-white font-bold block">Mechanical Trust Active</span>
+                Grounded by .nexus_wiki context
+              </div>
+            </div>
+          </div>
+
+          {/* Kernel Status */}
+          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 space-y-4">
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-emerald-400" />
+              OS Kernel Status
+            </h2>
+            
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Active PIDs</span>
+                <span className="text-xs font-mono text-emerald-400">{kernelStatus.activeProcesses.length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Context RAM</span>
+                <span className="text-xs font-mono text-indigo-400">{kernelStatus.ramUsage} slots</span>
+              </div>
+              
+              <div className="space-y-2 max-h-32 overflow-y-auto pt-2">
+                {kernelStatus.activeProcesses.map(p => (
+                  <div key={p.pid} className="flex items-center justify-between p-2 bg-white/5 rounded-lg border border-white/5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] text-gray-300 font-mono">{p.pid}</span>
+                    </div>
+                    <span className="text-[9px] text-gray-500 uppercase">{p.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <h2 className="text-lg font-semibold text-white">Agent Logs</h2>
-          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 h-[400px] overflow-y-auto font-mono text-sm">
+          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 h-[300px] overflow-y-auto font-mono text-sm">
             {selectedAgent ? (
               agents.find(a => a.id === selectedAgent)?.logs.map((log, i) => (
                 <div key={i} className="text-gray-400 py-1 border-b border-gray-800/50">
