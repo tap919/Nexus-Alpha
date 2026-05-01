@@ -5,7 +5,8 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { stream } from 'hono/streaming';
-import { createServer } from 'http';
+import { verify } from 'hono/jwt';
+import { serve } from '@hono/node-server';
 import { WebSocketServer, WebSocket } from 'ws';
 import { runAutomatedPipeline } from '../services/pipelineService';
 import type { PipelineExecution } from '../types';
@@ -28,7 +29,8 @@ const app = new Hono();
 // ─── Auth Middleware ──────────────────────────────────────────────────────────
 
 const NEXUS_API_KEY = process.env.NEXUS_API_KEY || '';
-const AUTH_BYPASS = process.env.NEXUS_AUTH_BYPASS === 'true';
+const AUTH_BYPASS = process.env.NEXUS_AUTH_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || 'super-secret-jwt-token-with-at-least-32-characters-long';
 
 app.use('/api/*', async (c, next) => {
   if (AUTH_BYPASS) return next();
@@ -42,16 +44,15 @@ app.use('/api/*', async (c, next) => {
   // API key check (server-to-server)
   if (NEXUS_API_KEY && key === NEXUS_API_KEY) return next();
 
-  // JWT bearer check (frontend Supabase sessions)
+  // Strict JWT verification against Supabase secret
   if (auth?.startsWith('Bearer ')) {
     const token = auth.slice(7);
     try {
-      const [, payloadB64] = token.split('.')
-      if (payloadB64) {
-        const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-        if (payload.exp && Date.now() / 1000 < payload.exp) return next();
+      const payload = await verify(token, SUPABASE_JWT_SECRET);
+      if (payload && payload.exp && Date.now() / 1000 < (payload.exp as number)) {
+        return next();
       }
-    } catch { /* fall through to 401 */ }
+    } catch { /* JWT verification failed, fall through to 401 */ }
   }
 
   return c.json({ error: 'Unauthorized' }, 401);
@@ -104,7 +105,19 @@ function broadcast(data: unknown): void {
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
 
-app.get('/health', (c) => c.json({ status: 'ok', wsClients: clients.size, ts: Date.now() }));
+app.get('/health', async (c) => {
+  // Hide operational WS counts unless properly authenticated
+  if (AUTH_BYPASS) return c.json({ status: 'ok', wsClients: clients.size, ts: Date.now() });
+
+  const auth = c.req.header('authorization');
+  if (auth?.startsWith('Bearer ')) {
+    try {
+      await verify(auth.slice(7), SUPABASE_JWT_SECRET);
+      return c.json({ status: 'ok', wsClients: clients.size, ts: Date.now() });
+    } catch { /* ignore */ }
+  }
+  return c.json({ status: 'ok', ts: Date.now() });
+});
 
 app.post('/api/pipeline/run', async (c) => {
   const body = await readJson<{ repos?: string[]; agentId?: string }>(c);
@@ -211,14 +224,19 @@ app.post('/api/brain/query', async (c) => {
 
 const BROWSER_COMMAND_ALLOWLIST = new Set([
   'screenshot', 'navigate', 'click', 'type', 'wait',
-  'get_text', 'get_html', 'evaluate', 'scroll', 'wait_for_selector',
+  'get_text', 'get_html', 'scroll', 'wait_for_selector',
+  'new_tab', 'wait_for_load', 'page_info', 'page_source', 'page_links', 'capture_screenshot'
 ]);
 
 app.post('/api/brain/browser', async (c) => {
   const body = await readJson<{ command?: string; timeout?: number }>(c);
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400);
   if (!body.command) return c.json({ error: 'command is required' }, 400);
-  const cmd = body.command.split(' ')[0];
+  
+  // Basic pre-flight check before hitting strict engine parser
+  const cmdRaw = body.command.split(';')[0].split('(')[0].trim();
+  const cmd = cmdRaw.startsWith('print') ? cmdRaw.slice(5).trim() : cmdRaw;
+  
   if (!BROWSER_COMMAND_ALLOWLIST.has(cmd)) {
     return c.json({ error: `Command "${cmd}" not permitted. Allowed: ${[...BROWSER_COMMAND_ALLOWLIST].join(', ')}` }, 403);
   }
@@ -386,26 +404,39 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
   const queueReady = await initPipelineQueue();
   console.log(`[Q] BullMQ pipeline queue ${queueReady ? 'connected' : 'unavailable (simulated mode)'}`);
 
-  const httpServer = createServer(async (req, res) => {
-    const handler = app.fetch;
-    const response = await handler(req as unknown as Request);
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-    res.end(await response.text());
+  // Proper Hono Node Server streaming adapter
+  const httpServer = serve({
+    fetch: app.fetch,
+    port: PORT_HTTP,
+  }, (info) => {
+    console.log(`[Hono] Nexus Alpha server running on port ${info.port}`);
+    console.log(`[WS]   WebSocket at ws://localhost:${info.port}/ws`);
+    if (AUTH_BYPASS) console.warn('[WARN] Auth bypass is ON — do not use NEXUS_AUTH_BYPASS=true in production');
   });
 
-  wsServer = new WebSocketServer({ server: httpServer, path: '/ws' });
-  wsServer.on('connection', (ws, req) => {
+  wsServer = new WebSocketServer({ server: httpServer as any, path: '/ws' });
+  wsServer.on('connection', async (ws, req) => {
     if (clients.size >= MAX_WS_CLIENTS) {
       ws.close(1013, 'Server at capacity');
       return;
     }
 
-    // Auth check for WebSocket (skip in dev bypass mode)
+    // Strict JWT Check for WebSocket
     if (!AUTH_BYPASS) {
       const url = new URL(req.url ?? '/', `http://localhost`);
       const token = url.searchParams.get('token');
       if (!token) {
         ws.close(1008, 'Unauthorized');
+        return;
+      }
+      try {
+        const payload = await verify(token, SUPABASE_JWT_SECRET);
+        if (!payload || !payload.exp || Date.now() / 1000 >= (payload.exp as number)) {
+          ws.close(1008, 'Token expired');
+          return;
+        }
+      } catch {
+        ws.close(1008, 'Invalid token signature');
         return;
       }
     }
@@ -427,12 +458,6 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
     for (const client of clients) {
       if (client.readyState === WebSocket.OPEN) client.send(json);
     }
-  });
-
-  httpServer.listen(PORT_HTTP, () => {
-    console.log(`[Hono] Nexus Alpha server running on port ${PORT_HTTP}`);
-    console.log(`[WS]   WebSocket at ws://localhost:${PORT_HTTP}/ws`);
-    if (AUTH_BYPASS) console.warn('[WARN] Auth bypass is ON — do not use NEXUS_AUTH_BYPASS=true in production');
   });
 })();
 
