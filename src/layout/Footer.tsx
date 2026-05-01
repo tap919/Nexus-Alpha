@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { DebtRadar } from '../components/DebtRadar';
 
 export const Footer = ({ latency = 42 }: { latency?: number }) => {
   const [uptime, setUptime] = useState(99.999);
@@ -14,13 +15,23 @@ export const Footer = ({ latency = 42 }: { latency?: number }) => {
   }, []);
 
   return (
-    <footer className="p-8 border-t border-[#1a1b1e] flex flex-col items-center gap-4 text-[#4a4b50] font-mono text-[10px]">
-      <div className="flex gap-8">
-        <span>LATENCY: {latency}MS</span>
+    <footer className="h-10 px-6 border-t border-white/5 bg-[#0A0A0B] flex items-center justify-between text-[#4a4b50] font-mono text-[9px] relative z-20">
+      <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-green-500/50 animate-pulse" />
+          <span>LATENCY: {latency}MS</span>
+        </div>
         <span>UPTIME: {uptime.toFixed(3)}%</span>
-        <span>CLUSTER: US-EAST-5</span>
+        <span>CLUSTER: NEXUS-CORE-ALPHA</span>
       </div>
-      <p>© 2026 NEXUS ALPHA ANALYTICS ENGINE. ALL RIGHTS RESERVED.</p>
+
+      <div className="flex items-center gap-8">
+        <DebtRadar />
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-indigo-400 opacity-50">PRO_TRIAL</span>
+          <span className="text-gray-600">© 2026 NEXUS ALPHA</span>
+        </div>
+      </div>
     </footer>
   );
 };

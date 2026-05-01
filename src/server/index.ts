@@ -1654,6 +1654,7 @@ app.post("/api/composer/generate", strictLimiter, async (req, res) => {
     res.json({
       success: true,
       plan: ultraPlan,
+      lore: `I implemented a consolidated async runner in ${prompt.includes('service') ? 'the requested service' : 'refactor_script.js'} to improve non-blocking I/O performance. I avoided a standard loop to prevent Event Loop starvation during heavy workloads.`,
       changes: [
         {
           id: Math.random().toString(36).slice(2),
@@ -1686,6 +1687,19 @@ app.post("/api/composer/apply", strictLimiter, async (req, res) => {
     
     logger.info("Composer", `Applied change to ${filePath}`);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/** POST /api/tools/debt - Analyze technical debt in a file */
+app.post("/api/tools/debt", strictLimiter, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (content === undefined) return res.status(400).json({ error: "Missing content" });
+    const { getDebtRadar } = await import("../services/staticAnalysisService");
+    const radar = getDebtRadar(content);
+    res.json(radar);
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }

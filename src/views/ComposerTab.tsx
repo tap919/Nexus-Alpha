@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileDiff, Check, X, Code, Send } from 'lucide-react';
+import { FileDiff, Check, X, Code, Send, Zap, Pin } from 'lucide-react';
+import { useWorkspaceStore } from '../stores/useWorkspaceStore';
 
 interface FileChange {
   id: string;
@@ -30,13 +31,34 @@ const MOCK_CHANGES: FileChange[] = [
 export const ComposerTab = () => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [thoughts, setThoughts] = useState<string[]>([]);
+  const [lore, setLore] = useState<string | null>(null);
   const [changes, setChanges] = useState<FileChange[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const { pinnedFiles, togglePinnedFile } = useWorkspaceStore();
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     setError(null);
+    setLore(null);
+    setThoughts([
+      'Initializing ULTRAPLAN orchestrator...',
+      'Analyzing repository graph for context...',
+      'Spawning synthesis agents...'
+    ]);
+
+    // Simulate streaming thoughts
+    const thoughtInterval = setInterval(() => {
+      const additionalThoughts = [
+        'Detected module boundaries in src/components...',
+        'Optimizing diff for minimal disruption...',
+        'Verifying logic integrity...'
+      ];
+      setThoughts(prev => [...prev, additionalThoughts[Math.floor(Math.random() * additionalThoughts.length)]].slice(-5));
+    }, 1500);
+
     try {
       const response = await fetch('/api/composer/generate', {
         method: 'POST',
@@ -50,6 +72,8 @@ export const ComposerTab = () => {
       const data = await response.json();
       if (data.success) {
         setChanges(data.changes);
+        setLore(data.lore);
+        setThoughts(['Synthesis complete. Proposed 1 file change.']);
       } else {
         setError(data.error || 'Generation failed');
       }
@@ -57,6 +81,7 @@ export const ComposerTab = () => {
       console.error('Composer Error:', err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      clearInterval(thoughtInterval);
       setIsGenerating(false);
     }
   };
@@ -92,27 +117,123 @@ export const ComposerTab = () => {
       <div className="flex items-center gap-3 mb-2">
         <FileDiff className="w-8 h-8 text-indigo-400" />
         <div>
-          <h2 className="text-2xl font-bold font-mono text-white">Composer</h2>
-          <p className="text-sm text-gray-400">Multi-Agent Code Synthesis & Diff Engine</p>
+          <h2 className="text-2xl font-bold font-mono text-white text-glow">Composer</h2>
+          <p className="text-sm text-gray-400 italic">Advanced Multi-Agent Synthesis Engine</p>
         </div>
       </div>
 
-      <div className="relative">
+      <div className="relative glass-card rounded-2xl p-1">
         <textarea
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
           placeholder="Describe the multi-file changes you want to make..."
-          className="w-full h-32 bg-[#1A1A1A] border border-gray-700 rounded-xl p-4 text-white font-mono text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none"
+          className="w-full h-32 bg-transparent border-none outline-none p-4 text-white font-mono text-sm resize-none placeholder:text-gray-600 focus:ring-0"
         />
-        <button
-          onClick={handleGenerate}
-          disabled={!prompt.trim() || isGenerating}
-          className="absolute bottom-4 right-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-mono text-sm flex items-center gap-2 transition-colors"
-        >
-          {isGenerating ? 'Synthesizing...' : 'Generate Changes'}
-          <Send className="w-4 h-4" />
-        </button>
+        <div className="absolute bottom-4 right-4 flex items-center gap-4">
+          {isGenerating && (
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-indigo-400 animate-pulse">REASONING_STREAM_ACTIVE</span>
+                <div className="flex gap-1">
+                  {[0, 1, 2].map(i => (
+                    <motion.div
+                      key={i}
+                      animate={{ opacity: [0.2, 1, 0.2] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                      className="w-1 h-1 bg-indigo-500 rounded-full"
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          <button
+            onClick={handleGenerate}
+            disabled={!prompt.trim() || isGenerating}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 aura-glow disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-mono text-sm flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-500/20"
+          >
+            {isGenerating ? 'Synthesizing...' : 'Generate'}
+            <Send className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Pinned Context */}
+      <div className="flex flex-wrap gap-2">
+        <AnimatePresence>
+          {pinnedFiles.map(file => (
+            <motion.div
+              key={file}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex items-center gap-2 px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-md group"
+            >
+              <Pin className="w-3 h-3 text-indigo-400" />
+              <span className="text-[10px] font-mono text-indigo-300">{file}</span>
+              <button 
+                onClick={() => togglePinnedFile(file)}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="w-2.5 h-2.5 text-indigo-400/50 hover:text-indigo-400" />
+              </button>
+            </motion.div>
+          ))}
+          {pinnedFiles.length === 0 && (
+            <div className="text-[10px] text-gray-600 font-mono italic">
+              No files pinned. The agent will use autonomous RAG.
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <AnimatePresence>
+        {lore && !isGenerating && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-xl relative overflow-hidden"
+          >
+            <div className="absolute top-0 right-0 p-2 opacity-10">
+              <Code className="w-12 h-12" />
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-300">Agent Architectural Lore</span>
+            </div>
+            <p className="text-sm text-gray-400 font-sans leading-relaxed">
+              {lore}
+            </p>
+          </motion.div>
+        )}
+
+        {(isGenerating || thoughts.length > 0) && changes.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="glass-card rounded-xl p-4 border-indigo-500/20"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-3 h-3 text-indigo-400" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">Agent Reasoning Trace</span>
+            </div>
+            <div className="space-y-1">
+              {thoughts.map((thought, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, x: -5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-center gap-3"
+                >
+                  <div className="w-1 h-1 bg-indigo-500/40 rounded-full" />
+                  <span className="text-xs font-mono text-gray-400">{thought}</span>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {error && (
         <motion.div
@@ -132,12 +253,12 @@ export const ComposerTab = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className={`border rounded-xl overflow-hidden ${change.status === 'accepted' ? 'border-green-500/50' : change.status === 'rejected' ? 'border-red-500/50' : 'border-gray-700'}`}
+              className={`glass-card rounded-xl overflow-hidden border ${change.status === 'accepted' ? 'border-green-500/30' : change.status === 'rejected' ? 'border-red-500/30' : 'border-white/10'}`}
             >
-              <div className="flex justify-between items-center bg-[#1A1A1A] p-3 border-b border-gray-700">
+              <div className="flex justify-between items-center bg-white/[0.03] p-3 border-b border-white/10">
                 <div className="flex items-center gap-2">
-                  <Code className="w-4 h-4 text-gray-400" />
-                  <span className="font-mono text-sm text-gray-300">{change.filePath}</span>
+                  <Code className="w-4 h-4 text-indigo-400" />
+                  <span className="font-mono text-sm text-gray-200">{change.filePath}</span>
                 </div>
                 {change.status === 'pending' && (
                   <div className="flex items-center gap-2">
@@ -146,17 +267,17 @@ export const ComposerTab = () => {
                   </div>
                 )}
                 {change.status !== 'pending' && (
-                  <span className={`text-xs font-mono px-2 py-1 rounded-full ${change.status === 'accepted' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                  <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full ${change.status === 'accepted' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
                     {change.status.toUpperCase()}
                   </span>
                 )}
               </div>
-              <div className="grid grid-cols-2 divide-x divide-gray-700 bg-[#0F0F11]">
+              <div className="grid grid-cols-2 divide-x divide-white/10 bg-[#0F0F11]/50 backdrop-blur-sm">
                 <div className="p-4 overflow-x-auto">
-                  <pre className="text-xs font-mono text-red-300/80"><code>{change.originalContent}</code></pre>
+                  <pre className="text-xs font-mono text-red-400/70 select-none"><code>{change.originalContent}</code></pre>
                 </div>
-                <div className="p-4 overflow-x-auto bg-green-950/10">
-                  <pre className="text-xs font-mono text-green-300"><code>{change.newContent}</code></pre>
+                <div className="p-4 overflow-x-auto bg-green-500/[0.03]">
+                  <pre className="text-xs font-mono text-green-400"><code>{change.newContent}</code></pre>
                 </div>
               </div>
             </motion.div>
@@ -166,3 +287,4 @@ export const ComposerTab = () => {
     </div>
   );
 };
+

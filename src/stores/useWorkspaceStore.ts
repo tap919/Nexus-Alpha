@@ -45,6 +45,7 @@ interface WorkspaceStore {
   activeProjectId: string | null;
   notifications: Notification[];
   webhooks: WebhookConfig[];
+  pinnedFiles: string[];
   // Projects
   createProject: (p: Omit<Project, "id" | "createdAt" | "updatedAt" | "buildHistory">) => string;
   updateProject: (id: string, updates: Partial<Project>) => void;
@@ -61,6 +62,9 @@ interface WorkspaceStore {
   updateWebhook: (id: string, updates: Partial<WebhookConfig>) => void;
   removeWebhook: (id: string) => void;
   fireWebhook: (event: WebhookConfig["events"][0], payload: unknown) => void;
+  // Context Pinning
+  togglePinnedFile: (filePath: string) => void;
+  clearPinnedFiles: () => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
@@ -68,6 +72,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   activeProjectId: null,
   notifications: [],
   webhooks: [],
+  pinnedFiles: [],
 
   createProject: (p) => {
     const id = `proj-${Date.now()}`;
@@ -149,4 +154,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
     }
   },
+
+  togglePinnedFile: (filePath) => 
+    set((s) => ({
+      pinnedFiles: s.pinnedFiles.includes(filePath) 
+        ? s.pinnedFiles.filter(f => f !== filePath)
+        : [...s.pinnedFiles, filePath]
+    })),
+
+  clearPinnedFiles: () => set({ pinnedFiles: [] }),
 }));

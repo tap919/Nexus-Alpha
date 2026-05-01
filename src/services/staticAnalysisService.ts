@@ -59,6 +59,37 @@ export function runDepCheck(targetPath?: string): { unused: string[]; missing: s
   }
 }
 
+export interface DebtRadarReport {
+  todos: number;
+  complexity: 'low' | 'medium' | 'high';
+  debtScore: number;
+  untypedExports: number;
+  recommendation: string;
+}
+
+export function getDebtRadar(content: string): DebtRadarReport {
+  const todos = (content.match(/\/\/ TODO:|\/\/ FIXME:/gi) || []).length;
+  const lines = content.split('\n');
+  const lineCount = lines.length;
+  const complexityScore = (content.match(/if |while |for |&& |\|\| /g) || []).length / (lineCount / 10);
+  
+  const untypedExports = (content.match(/export (const|let|var) \w+ =/g) || []).length;
+
+  let complexity: 'low' | 'medium' | 'high' = 'low';
+  if (complexityScore > 1.5) complexity = 'high';
+  else if (complexityScore > 0.8) complexity = 'medium';
+
+  const debtScore = (todos * 10) + (complexity === 'high' ? 30 : complexity === 'medium' ? 15 : 0) + (untypedExports * 5);
+
+  const recommendation = debtScore > 50 
+    ? "Critical refactor suggested: high complexity and debt found."
+    : debtScore > 20 
+      ? "Minor technical debt identified. Consider documenting exports."
+      : "Codebase healthy. Minimal debt detected.";
+
+  return { todos, complexity, debtScore, untypedExports, recommendation };
+}
+
 export async function runStaticAnalysisPhase(ctx: { execution: any; sourceRepos: string[]; targetPath?: string }): Promise<void> {
   const { execution } = ctx;
   const logs = ctx.execution?.logs ?? [];
