@@ -101,6 +101,18 @@ export default function LandingPage() {
           </div>
           <p className="text-gray-600 text-xs">© 2026 Nexus Alpha Inc. Built for Autonomy.</p>
         </div>
+        
+        {/* Autonomous Provenance Badge */}
+        <div className="max-w-7xl mx-auto mt-12 pt-8 border-t border-white/5 flex items-center justify-center">
+          <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-white/[0.02] border border-white/5 text-[10px] font-mono text-gray-500">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>ORCHESTRATED BY NEXUS KERNEL</span>
+            <span className="text-gray-700">|</span>
+            <span className="text-indigo-400">PID: p_saas_gen_v2</span>
+            <span className="text-gray-700">|</span>
+            <span>2026-05-01 09:16:35</span>
+          </div>
+        </div>
       </footer>
     </main>
   );
