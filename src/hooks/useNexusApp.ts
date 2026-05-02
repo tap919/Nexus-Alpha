@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData } from './useDashboardData';
 import { useAppStore } from '../stores/useAppStore';
 import { usePipelineStore } from '../stores/usePipelineStore';
-import { useWorkspaceStore } from '../stores/useWorkspaceStore';
 import { startWorkflow } from '../services/temporalClient';
 import { useCodeixStore } from '../services/codeixService';
 import { DashboardData } from '../types';
