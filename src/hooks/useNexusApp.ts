@@ -46,12 +46,16 @@ export function useNexusApp() {
   // Initialize Codeix
   useEffect(() => {
     const initCodeix = async () => {
-      const codeix = useCodeixStore.getState();
-      const loaded = await codeix.loadFromDisk('.');
-      if (!loaded && !codeix.index && !codeix.isIndexing) {
-        console.log('[Nexus] Starting initial codebase indexing...');
-        await codeix.createIndex('.');
-        await codeix.saveIndex('.');
+      try {
+        const codeix = useCodeixStore.getState();
+        const loaded = await codeix.loadFromDisk('.');
+        if (!loaded && !codeix.index && !codeix.isIndexing) {
+          console.log('[Nexus] Starting initial codebase indexing...');
+          await codeix.createIndex('.');
+          await codeix.saveIndex('.');
+        }
+      } catch (e: any) {
+        console.warn('[Codeix] Skipped — browser environment:', e.message);
       }
     };
     initCodeix();
