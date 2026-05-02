@@ -1,12 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { lazy, Suspense } from 'react';
+/** @license SPDX-License-Identifier: Apache-2.0 */
+import { lazy, Suspense, Component, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { RefreshCcw } from 'lucide-react';
-
+import { RefreshCcw, AlertTriangle } from 'lucide-react';
 import { Header } from '../layout/Header';
 import { Sidebar } from '../layout/Sidebar';
 import { Footer } from '../layout/Footer';
@@ -16,7 +11,40 @@ import { LicenseGate } from './views/LicenseGate';
 import { GlobalCommandBar } from './GlobalCommandBar';
 import { useNexusApp } from '../hooks/useNexusApp';
 
-// Lazy-loaded views
+// ── Per-tab error boundary ──────────────────────────────────────────────────────────────────────────────
+interface TabEBState { hasError: boolean; error: Error | null }
+class TabErrorBoundary extends Component<{ name: string; children: ReactNode }, TabEBState> {
+  constructor(props: { name: string; children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error): TabEBState {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error) {
+    console.error(`[Nexus] Error in tab "${this.props.name}":`, error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
+          <AlertTriangle className="text-amber-400" size={32} />
+          <h2 className="text-lg font-semibold text-white">{this.props.name} failed to load</h2>
+          <p className="text-sm text-gray-400 max-w-md">{this.state.error?.message}</p>
+          <button
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm text-white transition-colors"
+            onClick={() => this.setState({ hasError: false, error: null })}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ── Lazy views ──────────────────────────────────────────────────────────────────────────────────────
 const CommandCenterTab = lazy(() => import('./views/CommandCenterTab').then(m => ({ default: m.CommandCenterTab })));
 const PipelineTab = lazy(() => import('./views/PipelineTab').then(m => ({ default: m.PipelineTab })));
 const SettingsTab = lazy(() => import('./views/SettingsTab').then(m => ({ default: m.SettingsTab })));
@@ -34,51 +62,53 @@ const AgentEvalTab = lazy(() => import('./views/AgentEvalTab').then(m => ({ defa
 const MagicTab = lazy(() => import('../features/composer/MagicComposer').then(m => ({ default: m.MagicComposer })));
 const PlanReviewTab = lazy(() => import('./views/PlanReviewTab'));
 
+// ── Suspense fallback ─────────────────────────────────────────────────────────────────────────────────────
+function TabLoader() {
+  return (
+    <div className="flex items-center justify-center h-full min-h-[200px]">
+      <motion.div
+        className="w-8 h-8 rounded-full border-2 border-emerald-500/30 border-t-emerald-500"
+        animate={{ rotate: 360 }}
+        transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
+      />
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────────────────────────────────────────
 export default function App() {
   const {
-    data,
-    loading,
-    latency,
-    appLicensed,
-    activeTab,
-    setActiveTab,
+    data, loading, latency, appLicensed,
+    activeTab, setActiveTab,
     nexusSystemStatus,
     activeRun,
     selectedRepos,
-    refetch
+    refetch,
   } = useNexusApp();
 
-  if (!appLicensed) return <LicenseGate onActivate={() => {}} />;
+  if (!appLicensed) return <LicenseGate onUnlock={() => refetch()} />;
 
   return (
-    <div className="flex h-screen bg-[#0A0A0B] text-gray-300 font-sans overflow-hidden">
-      <GlobalCommandBar />
-      
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+    <div className="min-h-screen bg-[#0A0A0B] flex flex-col">
+      {/* Top glow decoration */}
+      <div className="pointer-events-none fixed top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
 
-      <main className="flex-1 flex flex-col relative overflow-hidden">
-        {/* Top Glow Decor */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
-        
-        <Header 
-          loading={loading}
-          onRefresh={refetch}
-        />
+      <Header
+        loading={loading}
+        latency={latency}
+        nexusSystemStatus={nexusSystemStatus}
+        activeRun={activeRun}
+        onRefetch={refetch}
+      />
 
-        <div className="flex-1 overflow-y-auto relative z-10">
-          <div className="max-w-[1600px] mx-auto w-full">
-            <Suspense fallback={
-              <div className="flex items-center justify-center h-[60vh]">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                >
-                  <RefreshCcw className="w-8 h-8 text-indigo-500/50" />
-                </motion.div>
-              </div>
-            }>
-              {activeTab === 'Overview' && <OverviewTab data={data} nexusSystemStatus={nexusSystemStatus} onTabChange={setActiveTab} />}
-              {activeTab === 'Composer' && <ComposerTab />}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
+
+        <main className="flex-1 overflow-auto p-4 md:p-6">
+          <TabErrorBoundary name={activeTab}>
+            <Suspense fallback={<TabLoader />}>
+              {activeTab === 'Overview' && <OverviewTab data={data} loading={loading} />}
+              {activeTab === 'Composer' && <ComposerTab selectedRepos={selectedRepos} />}
               {activeTab === 'Command Center' && <CommandCenterTab />}
               {activeTab === 'Pipeline' && <PipelineTab />}
               {activeTab === 'Activity' && <ActivityTab />}
@@ -96,11 +126,12 @@ export default function App() {
               {activeTab === 'Magic' && <MagicTab />}
               {activeTab === 'Review' && <PlanReviewTab />}
             </Suspense>
-          </div>
-        </div>
+          </TabErrorBoundary>
+        </main>
+      </div>
 
-        <Footer />
-      </main>
+      <Footer />
+      <GlobalCommandBar onTabChange={setActiveTab} />
     </div>
   );
 }
