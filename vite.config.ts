@@ -3,12 +3,40 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
+// Heavy Node-only packages that must never be bundled for the browser
+const NODE_EXTERNALS = [
+  'child_process',
+  'url',
+  'path',
+  'fs',
+  'os',
+  'crypto',
+  'net',
+  'tls',
+  'http',
+  'https',
+  'stream',
+  'zlib',
+  'events',
+  'util',
+  'process',
+  'dns',
+  'http2',
+  'worker_threads',
+  '@temporalio/worker',
+  '@temporalio/workflow',
+  '@temporalio/activity',
+  '@temporalio/client',
+];
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
     nodePolyfills({
-      include: ['path', 'process', 'os', 'crypto', 'stream', 'util', 'events', 'buffer', 'http', 'https', 'net', 'tls', 'fs', 'url', 'zlib', 'dns', 'http2'],
+      // Only polyfill modules that are actually imported in browser code.
+      // Heavy modules (fs, net, tls) are kept external so they never hit the browser bundle.
+      include: ['path', 'process', 'os', 'crypto', 'stream', 'util', 'events', 'buffer', 'url', 'zlib'],
     }),
   ],
   server: {
@@ -21,32 +49,10 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    sourcemap: false,
+    // Enable sourcemaps in CI/dev builds; disable for production release
+    sourcemap: process.env.NODE_ENV !== 'production',
     rollupOptions: {
-      external: [
-        "child_process",
-        "url",
-        "path",
-        "fs",
-        "os",
-        "crypto",
-        "net",
-        "tls",
-        "http",
-        "https",
-        "stream",
-        "zlib",
-        "events",
-        "util",
-        "process",
-        "dns",
-        "http2",
-        "https",
-        "@temporalio/worker",
-        "@temporalio/workflow",
-        "@temporalio/activity",
-        "@temporalio/client",
-      ],
+      external: NODE_EXTERNALS,
       output: {
         manualChunks: {
           vendor: ["react", "react-dom", "react-router-dom"],
@@ -59,6 +65,7 @@ export default defineConfig({
           langchain: ["langchain", "@langchain/core", "@langchain/community"],
           supabase: ["@supabase/supabase-js", "@supabase/postgrest-js"],
           forms: ["react-hook-form", "@hookform/resolvers", "zod"],
+          editor: ["@monaco-editor/react"],
         },
       },
     },
@@ -86,6 +93,5 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? "1.0.0"),
-    // Removed redundant process/global polyfills that conflict with vite-plugin-node-polyfills
   },
 });
