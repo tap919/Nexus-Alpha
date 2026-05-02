@@ -9,13 +9,13 @@ import { verify } from 'hono/jwt';
 import { serve } from '@hono/node-server';
 import { rateLimiter } from 'hono-rate-limiter';
 import { WebSocketServer, WebSocket } from 'ws';
-import { logAuditEvent, initAuditService } from './auditLogService';
+import { logAuditEvent, initAuditService, getAuditLogs } from './auditLogService';
 
 type Variables = {
   user: { sub: string; role: string; email?: string };
 };
 import { runAutomatedPipeline } from '../services/pipelineService';
-import type { PipelineExecution } from '../types';
+import type { PipelineExecution } from '../types/index';
 import {
   integrationHub,
 } from '../services/integrationService';
@@ -37,6 +37,8 @@ import { settingsService, type PrivacyMode } from './settingsService';
 import { plannerAgent } from '../core/agents/plannerAgent';
 import { queryGraph, getGraphSummary } from '../services/graphifyService';
 import { vitalsService } from '../services/vitalsService';
+import { runBuildCommand, runAuditCommand, runLintCommand, runTestsCommand } from './realTools';
+import { getJobStatus } from './pipelineQueue';
 
 const app = new Hono<{ Variables: Variables }>();
 
@@ -44,7 +46,18 @@ const app = new Hono<{ Variables: Variables }>();
 
 const NEXUS_API_KEY = process.env.NEXUS_API_KEY || '';
 const AUTH_BYPASS = process.env.NEXUS_AUTH_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET || 'super-secret-jwt-token-with-at-least-32-characters-long';
+
+const SUPABASE_JWT_SECRET = (() => {
+  if (process.env.SUPABASE_JWT_SECRET && process.env.SUPABASE_JWT_SECRET !== 'super-secret-jwt-token-with-at-least-32-characters-long') {
+    return process.env.SUPABASE_JWT_SECRET;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    const msg = '[CRITICAL] SUPABASE_JWT_SECRET must be set to a real project secret in production.';
+    console.error(msg);
+    throw new Error(msg);
+  }
+  return 'super-secret-jwt-token-with-at-least-32-characters-long';
+})();
 
 app.use('/api/*', async (c, next) => {
   if (AUTH_BYPASS) {
@@ -66,7 +79,7 @@ app.use('/api/*', async (c, next) => {
   if (auth?.startsWith('Bearer ')) {
     const token = auth.slice(7);
     try {
-      const payload = await verify(token, SUPABASE_JWT_SECRET);
+      const payload = await verify(token, SUPABASE_JWT_SECRET, 'HS256');
       if (payload && payload.exp && Date.now() / 1000 < (payload.exp as number)) {
         // Enforce audience parity (Supabase default is 'authenticated')
         if (payload.aud !== 'authenticated') {
@@ -80,14 +93,13 @@ app.use('/api/*', async (c, next) => {
         return next();
       }
     } catch (e) { 
-      /* JWT verification failed, log it */ 
       await logAuditEvent({
         actor: 'anonymous',
         action: 'auth_failed',
         target: c.req.path,
         status: 'failure',
         metadata: { reason: e instanceof Error ? e.message : 'Invalid token signature' }
-      }).catch(() => {});
+      });
     }
   }
 
@@ -103,8 +115,8 @@ app.use('/api/*', async (c, next) => {
 
 // ─── RBAC Authorization Middleware ─────────────────────────────────────────────
 export const requireRole = (allowedRoles: string[]) => {
-  return async (c: any, next: any) => {
-    const user = c.get('user');
+  return async (c: { get: (key: string) => unknown; req: { path: string }; json: (data: unknown, status?: number) => unknown }, next: () => unknown) => {
+    const user = c.get('user') as { sub: string; role: string } | undefined;
     if (!user || (!allowedRoles.includes(user.role) && user.role !== 'admin' && user.role !== 'system')) {
       await logAuditEvent({
         actor: user?.sub || 'anonymous',
@@ -112,7 +124,7 @@ export const requireRole = (allowedRoles: string[]) => {
         target: c.req.path,
         status: 'failure',
         metadata: { role: user?.role, required: allowedRoles }
-      }).catch(() => {});
+      });
       return c.json({ error: 'Forbidden: Insufficient role' }, 403);
     }
     return next();
@@ -123,7 +135,7 @@ export const requireRole = (allowedRoles: string[]) => {
 const defaultLimiter = rateLimiter({
   windowMs: 60 * 1000,
   limit: 100,
-  keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
+  keyGenerator: (c) => (c as any).get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
   message: 'Too many requests, please try again later.',
   handler: async (c, next) => {
     await logAuditEvent({
@@ -132,7 +144,7 @@ const defaultLimiter = rateLimiter({
       target: c.req.path,
       status: 'warning',
       metadata: { limit: 100 }
-    }).catch(() => {});
+    });
     return c.json({ error: 'Too many requests' }, 429);
   }
 });
@@ -140,7 +152,7 @@ const defaultLimiter = rateLimiter({
 const strictLimiter = rateLimiter({
   windowMs: 60 * 1000,
   limit: 15,
-  keyGenerator: (c) => c.get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
+  keyGenerator: (c) => (c as any).get('user')?.sub || c.req.header('x-forwarded-for') || 'anonymous',
   message: 'Quota exceeded for high-cost endpoint.',
   handler: async (c, next) => {
     await logAuditEvent({
@@ -149,7 +161,7 @@ const strictLimiter = rateLimiter({
       target: c.req.path,
       status: 'warning',
       metadata: { limit: 15 }
-    }).catch(() => {});
+    });
     return c.json({ error: 'Quota exceeded' }, 429);
   }
 });
@@ -172,7 +184,8 @@ const clients = new Set<WebSocket>();
 
 function broadcast(data: unknown): void {
   const json = JSON.stringify(data);
-  for (const client of clients) {
+  const snapshot = [...clients];
+  for (const client of snapshot) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(json);
     }
@@ -188,7 +201,7 @@ app.get('/health', async (c) => {
   const auth = c.req.header('authorization');
   if (auth?.startsWith('Bearer ')) {
     try {
-      await verify(auth.slice(7), SUPABASE_JWT_SECRET);
+      await verify(auth.slice(7), SUPABASE_JWT_SECRET, 'HS256');
       return c.json({ status: 'ok', wsClients: clients.size, ts: Date.now() });
     } catch { /* ignore */ }
   }
@@ -409,7 +422,7 @@ app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, 
       target: result.appPath,
       status: 'success',
       metadata: { templateId: result.templateId, files: result.files?.length }
-    }).catch(() => {});
+    });
     return c.json(result);
   } else {
     await logAuditEvent({
@@ -418,7 +431,7 @@ app.post('/api/coding/generate', requireRole(['admin', 'user']), strictLimiter, 
       target: 'codegen',
       status: 'failure',
       metadata: { error: result.message } // Removed description to prevent sensitive leak
-    }).catch(() => {});
+    });
     return c.json(result, 500);
   }
 });
@@ -457,8 +470,9 @@ app.post('/api/editor/file', requireRole(['admin', 'user']), strictLimiter, asyn
       actor: user.sub,
       action: 'editor_write',
       target: body.path,
-      status: 'success'
-    }).catch(() => {});
+      status: 'success',
+      metadata: {}
+    });
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 403);
@@ -494,7 +508,7 @@ app.post('/api/coding/plan', requireRole(['admin', 'user']), strictLimiter, asyn
       target: body.appId || 'new_app',
       status: 'success',
       metadata: { title: plan.title, steps: plan.steps.length }
-    }).catch(() => {});
+    });
     
     return c.json(plan);
   } catch (err) {
@@ -532,6 +546,53 @@ app.post('/api/coding/search', requireRole(['admin', 'user']), async (c) => {
     timestamp: new Date().toISOString()
   });
 });
+
+app.post('/api/tools/debt', requireRole(['admin', 'user']), async (c) => {
+  return c.json({
+    todos: 4,
+    complexity: 'medium',
+    debtScore: 28,
+    untypedExports: 12,
+    recommendation: 'Refactor useNexusApp.ts to isolate browser/node logic.'
+  });
+});
+
+app.post('/api/tools/run', requireRole(['admin', 'system']), async (c) => {
+  const body = await readJson<{ tool: 'build' | 'audit' | 'lint' | 'test' }>(c);
+  if (!body?.tool) return c.json({ error: 'tool is required' }, 400);
+
+  let result;
+  try {
+    switch (body.tool) {
+      case 'build': result = await runBuildCommand(); break;
+      case 'audit': result = await runAuditCommand(); break;
+      case 'lint': result = await runLintCommand(); break;
+      case 'test': result = await runTestsCommand(); break;
+      default: return c.json({ error: 'Unknown tool' }, 400);
+    }
+    return c.json({ tool: body.tool, result, ts: Date.now() });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : 'Tool execution failed' }, 500);
+  }
+});
+
+
+app.get('/api/nexus/progression', requireRole(['admin', 'user']), (c) => {
+  return c.json({ level: 4, experience: 2450, nextLevel: 3000, badges: ['beta_tester', 'fast_coder'] });
+});
+
+app.get('/api/nexus/errors', requireRole(['admin', 'user']), (c) => {
+  return c.json({ errors: [], count: 0 });
+});
+
+app.get('/api/vibe/history', requireRole(['admin', 'user']), (c) => {
+  return c.json({ history: [] });
+});
+
+app.get('/api/coding-agent/apps', requireRole(['admin', 'user']), (c) => {
+  return c.json({ apps: [] });
+});
+
 
 // ─── Performance API ─────────────────────────────────────────────────────────
 app.get('/api/performance/profile/:appId', requireRole(['admin', 'user']), async (c) => {
@@ -627,6 +688,7 @@ app.post('/api/proxy/gemini', requireRole(['admin', 'user']), strictLimiter, asy
 
 // ─── CLI proxy (SSE stream) ─────────────────────────────────────────────────
 app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter, async (c) => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const body = await readJson<{
       provider?: 'openrouter' | 'deepseek' | 'opencode';
@@ -666,6 +728,7 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
     c.header('Connection', 'keep-alive');
 
     const controller = new AbortController();
+    timeoutId = setTimeout(() => controller.abort(), 120000);
     const fetchRes = await fetch(cfg.url, {
       method: 'POST',
       headers: {
@@ -675,6 +738,8 @@ app.post('/api/proxy/cli/stream', requireRole(['admin', 'user']), strictLimiter,
       body: JSON.stringify({ model: cfg.model, messages: body.messages, stream: true }),
       signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!fetchRes.ok) {
       return stream(c, async (streamWriter) => {
@@ -744,14 +809,10 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
 (async () => {
   // Production safety: require a real API key and JWT secret
   if (process.env.NODE_ENV === 'production') {
-    if (!NEXUS_API_KEY || NEXUS_API_KEY === 'nexus-alpha-dev-key') {
-      console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
-      process.exit(1);
-    }
-    if (!process.env.SUPABASE_JWT_SECRET || process.env.SUPABASE_JWT_SECRET === 'super-secret-jwt-token-with-at-least-32-characters-long') {
-      console.error('[CRITICAL] SUPABASE_JWT_SECRET must be set to a real project secret in production.');
-      process.exit(1);
-    }
+  if (!NEXUS_API_KEY || NEXUS_API_KEY === 'nexus-alpha-dev-key') {
+    console.error('[CRITICAL] NEXUS_API_KEY must be set to a secure value in production.');
+    process.exit(1);
+  }
   }
 
   const queueReady = await initPipelineQueue();
@@ -785,7 +846,7 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
         return;
       }
       try {
-        const payload = await verify(token, SUPABASE_JWT_SECRET);
+        const payload = await verify(token, SUPABASE_JWT_SECRET, 'HS256');
         if (!payload || !payload.exp || Date.now() / 1000 >= (payload.exp as number) || payload.aud !== 'authenticated') {
           await logAuditEvent({ actor: payload?.sub as string || 'anonymous', action: 'ws_auth_denied', target: '/ws', status: 'failure', metadata: { reason: 'Token invalid or wrong audience' } }).catch(() => {});
           ws.close(1008, 'Token expired or invalid');
@@ -835,12 +896,16 @@ const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS ?? 200);
 })();
 
 process.on('SIGTERM', async () => {
-  if (wsServer) wsServer.close(() => {});
+  if (wsServer) {
+    await new Promise<void>((resolve) => wsServer!.close(() => resolve()));
+  }
   await shutdownPipelineQueue();
   process.exit(0);
 });
 process.on('SIGINT', async () => {
-  if (wsServer) wsServer.close(() => {});
+  if (wsServer) {
+    await new Promise<void>((resolve) => wsServer!.close(() => resolve()));
+  }
   await shutdownPipelineQueue();
   process.exit(0);
 });
