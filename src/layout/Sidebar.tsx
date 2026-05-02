@@ -1,9 +1,16 @@
 import { useState, type ElementType } from 'react';
-import { Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings, ChevronDown, ChevronRight, LayoutDashboard, Workflow, Shield, Brain, FileCode, GitCompare, Database, Eye, Package, Cpu, Wand2, Trophy, ClipboardList } from 'lucide-react';
+import {
+  Sparkles, BarChart3, Terminal, Activity, Zap, History, Settings,
+  ChevronDown, ChevronRight, LayoutDashboard, Workflow,
+  Shield, Brain, FileCode, GitCompare, Database, Eye, Package, Cpu,
+  Wand2, Trophy, ClipboardList,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SystemManifest } from './SystemManifest';
 
-export type TabName = 'Composer' | 'Overview' | 'Command Center' | 'Pipeline' | 'Settings' | 'Activity' | 'History' | 'Audit' | 'Mission Control' | 'Editor' | 'Changes' | 'Memory' | 'Preview' | 'Extensions' | 'System' | 'Agent Eval' | 'Magic' | 'Review';
+// Re-export TabName from the store (source of truth) for backward compatibility
+export type { TabName } from '../stores/useAppStore';
+import type { TabName } from '../stores/useAppStore';
 
 const PRIMARY_ITEMS: { icon: ElementType; label: TabName }[] = [
   { icon: Sparkles, label: 'Composer' },
@@ -55,20 +62,18 @@ export const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
             )}
           >
             <item.icon size={20} />
-            <span className="text-sm font-medium hidden lg:block">{item.label}</span>
+            <span className="hidden lg:block text-sm font-medium">{item.label}</span>
           </button>
         ))}
 
         <button
-          aria-label={advancedOpen ? 'Collapse advanced menu' : 'Expand advanced menu'}
-          aria-expanded={advancedOpen}
           onClick={() => setAdvancedOpen(!advancedOpen)}
           className={cn(
             'flex items-center gap-3 p-3 rounded-lg transition-all group mt-2 text-[#6B7280] hover:text-[#9CA3AF] hover:bg-[#151619] focus-visible:ring-2 focus-visible:ring-emerald-500/50',
           )}
         >
           {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          <span className="text-[10px] font-mono uppercase tracking-[0.2em] hidden lg:block">Advanced</span>
+          <span className="hidden lg:block text-xs font-semibold uppercase tracking-wider">Advanced</span>
         </button>
 
         {advancedOpen && ADVANCED_ITEMS.map((item) => (
@@ -86,13 +91,11 @@ export const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
             )}
           >
             <item.icon size={20} />
-            <span className="text-sm font-medium hidden lg:block">{item.label}</span>
+            <span className="hidden lg:block text-sm font-medium">{item.label}</span>
           </button>
         ))}
       </nav>
-      <div className="p-4 mb-8">
-        <SystemManifest />
-      </div>
+      <SystemManifest />
     </aside>
   );
 };
